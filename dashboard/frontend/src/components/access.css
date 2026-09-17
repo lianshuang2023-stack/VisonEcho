@@ -1,0 +1,30 @@
+.ve-access-shell { min-height:100dvh; padding:0 24px 48px; background:var(--ws-bg); color:var(--ws-text); }
+.ws-app.ve-access-modal { min-height:0; }
+.ve-access-header { max-width:1120px; height:84px; margin:0 auto; display:flex; align-items:center; justify-content:space-between; }
+.ve-access-header .ws-brand { display:flex; gap:10px; align-items:center; color:var(--ws-text); text-decoration:none; }
+.ve-access-card { width:min(100%,420px); margin:6vh auto 0; background:var(--ws-panel); border:1px solid var(--ws-line); border-radius:16px; padding:30px; }
+.ve-access-title { margin-bottom:24px; }
+.ve-access-title>svg { color:var(--ve-accent); margin-bottom:14px; }
+.ve-access-title h1 { font-size:24px; font-weight:600; margin:0 0 9px; letter-spacing:-.03em; }
+.ve-access-title p { font-size:13px; color:var(--ws-muted); line-height:1.7; margin:0; }
+.ve-access-tabs { display:flex; border-bottom:1px solid var(--ws-line); margin-bottom:20px; gap:24px; }
+.ve-access-tabs button { padding:10px 0; color:var(--ws-muted); border:0; border-bottom:2px solid transparent; background:none; font-size:14px; }
+.ve-access-tabs button[aria-pressed=true] { color:var(--ve-accent); border-bottom-color:var(--ve-accent); font-weight:600; }
+.ve-access-form { display:grid; gap:16px; }
+.ve-access-form input { width:100%; padding:11px 12px; }
+.ve-access-form .ws-field small { line-height:1.5; color:var(--ws-muted); font-size:11px; }
+.ve-access-form>.ws-button { justify-content:center; margin-top:2px; }
+.ve-access-form>.ws-text-button { justify-self:center; font-size:12px; }
+.ve-access-note { margin:0 0 8px; color:var(--ws-muted); line-height:1.7; font-size:13px; }
+.ve-access-trial { margin-top:24px; padding-top:22px; border-top:1px solid var(--ws-line); text-align:center; }
+.ve-access-trial>.ws-button { width:100%; justify-content:center; }
+.ve-access-trial p { margin:10px 0 0; font-size:11px; color:var(--ws-muted); line-height:1.7; }
+.ve-access-controls { display:flex; align-items:center; gap:9px; color:var(--ws-muted); font-size:12px; border-left:1px solid var(--ws-line); padding-left:12px; }
+.ve-access-controls>span,.ve-access-controls>button { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
+.ve-access-controls>span { max-width:150px; overflow:hidden; text-overflow:ellipsis; }
+.ve-access-controls>button { border:0; background:transparent; color:var(--ve-accent); padding:7px 2px; font-size:12px; }
+.ve-access-controls>button:disabled { opacity:.45; cursor:not-allowed; }
+.ve-guest-notice { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; color:var(--ws-muted); background:var(--ws-panel); border-bottom:1px solid var(--ws-line); padding:10px 36px; font-size:12px; }
+.ve-access-shell :is(button,input):focus-visible,.ve-access-controls button:focus-visible { outline:2px solid var(--ve-accent); outline-offset:3px; }
+@media(max-width:760px) { .ve-access-controls { gap:7px; padding-left:7px; } .ve-access-controls>span { max-width:90px; } .ve-guest-notice { padding:10px 20px; } .ve-header-controls:has(.ve-access-controls) { flex-wrap:wrap; justify-content:flex-end; } }
+@media(max-width:480px) { .ve-access-shell { padding:0 16px 24px; } .ve-access-card { padding:22px; margin-top:3vh; } .ve-access-header { height:72px; } .ve-access-controls { border:0; } }

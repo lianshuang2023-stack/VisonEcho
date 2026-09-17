@@ -1,0 +1,40 @@
+# Build from application sources only. Local cases and secrets never enter
+# the Docker build context, even when a future Dockerfile uses COPY . .
+**
+!Dockerfile
+!.dockerignore
+!run-local.sh
+!run-hosted.sh
+!LICENSE
+!NOTICE
+!local_backend/
+!local_backend/*.py
+!local_backend/requirements.txt
+!dashboard/
+!dashboard/frontend/
+!dashboard/frontend/package.json
+!dashboard/frontend/package-lock.json
+!dashboard/frontend/index.html
+!dashboard/frontend/tsconfig*.json
+!dashboard/frontend/vite.config.ts
+!dashboard/frontend/public/
+!dashboard/frontend/public/favicon.svg
+!dashboard/frontend/src/
+!dashboard/frontend/src/**
+
+# Re-exclude local files that may be placed inside an allowed source directory.
+**/.env
+**/.env.*
+**/.local-data/**
+**/node_modules/**
+**/__pycache__/**
+**/*.pyc
+**/*.mp4
+**/*.mov
+**/*.mkv
+**/*.wav
+**/*.mp3
+**/*.jpg
+**/*.jpeg
+**/*.png
+**/homeTranslations.json

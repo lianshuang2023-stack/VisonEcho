@@ -34,6 +34,13 @@ cdk-outputs.json
 .env
 .env.local
 .env.*.local
+.env.*
+!.env.azure.example
+!.env.hosted.example
+.hosted-data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 .local-data/
 .pytest_cache/
 

@@ -28,6 +28,7 @@ export async function requestJson<T>(path: string, options: RequestInit = {}): P
     signal: options.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) {
+    if (response.status === 401) window.dispatchEvent(new Event('visionecho-access-expired'));
     const body: unknown = await response.json().catch(() => null);
     throw new Error(serverMessage(body, `Request failed (${response.status}). Please try again.`));
   }

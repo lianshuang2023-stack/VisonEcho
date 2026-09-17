@@ -53,6 +53,10 @@ class Settings:
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"
     data_dir: Path = ROOT / ".local-data"
+    access_mode: str = "local"
+    public_origin: str = ""
+    hosted_data_dir: Path = ROOT / ".hosted-data"
+    workspace_upload_limit: int | None = None
 
     @classmethod
     def load(cls):
@@ -75,6 +79,9 @@ class Settings:
             ffmpeg_bin=get("FFMPEG_BIN", "ffmpeg"),
             ffprobe_bin=get("FFPROBE_BIN", "ffprobe"),
             data_dir=Path(get("LOCAL_DATA_DIR", str(ROOT / ".local-data"))).resolve(),
+            access_mode=get("ACCESS_MODE", "local"),
+            public_origin=get("PUBLIC_ORIGIN"),
+            hosted_data_dir=Path(get("HOSTED_DATA_DIR", str(ROOT / ".hosted-data"))).resolve(),
         )
 
     def issues(self):

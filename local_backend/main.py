@@ -223,17 +223,24 @@ def enqueue_job(store, background, video_id, min_gap=2, language=None, source_re
 
 def create_app(settings=None):
     settings = settings or Settings.load()
+    if settings.access_mode == 'hosted':
+        from .hosted import create_hosted_app
+        return create_hosted_app(settings)
+    if settings.access_mode != 'local':
+        raise ValueError('ACCESS_MODE must be local or hosted.')
     store = Store(settings)
     app = FastAPI(title='VisionEcho API', docs_url='/api/docs', redoc_url=None)
     app.state.store = store
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=['127.0.0.1', 'localhost', '[::1]', 'testserver'])
+    from urllib.parse import urlsplit
+    extra_host = urlsplit(settings.public_origin).hostname if settings.public_origin else None
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=['127.0.0.1', 'localhost', '[::1]', 'testserver'] + ([extra_host] if extra_host else []))
 
     @app.middleware('http')
     async def local_origin_only(request, call_next):
         origin = request.headers.get('origin')
         if request.method not in ('GET', 'HEAD', 'OPTIONS') and origin:
             if origin not in {'http://127.0.0.1:5174', 'http://localhost:5174',
-                              'http://127.0.0.1:8000', 'http://localhost:8000'}:
+                              'http://127.0.0.1:8000', 'http://localhost:8000', settings.public_origin}:
                 return JSONResponse({'error': 'Local requests only.'}, status_code=403)
         return await call_next(request)
 
@@ -252,6 +259,11 @@ def create_app(settings=None):
                 'max_video_seconds': settings.max_video_seconds,
                 'max_upload_mb': settings.max_upload_bytes // 1024 // 1024}
 
+    @app.get('/api/access/session')
+    def local_session():
+        return {'mode': 'local', 'user': None, 'limits': {'max_video_seconds': settings.max_video_seconds,
+                'max_upload_mb': settings.max_upload_bytes // 1024 // 1024}}
+
     @app.get('/api/trigger/videos')
     def inputs():
         with store.lock:
@@ -268,6 +280,8 @@ def create_app(settings=None):
         token = secrets.token_urlsafe(24)
         with store.lock:
             require_collection(store.data, payload.collection_id)
+            if settings.workspace_upload_limit is not None and len(store.data['inputs']) + len(store.pending) + len(store.active_uploads) >= settings.workspace_upload_limit:
+                raise HTTPException(403, 'Guest trial supports two uploads. Register to keep creating.')
             if len(store.pending) >= 100:
                 raise HTTPException(429, 'Too many pending uploads. Restart the local server.')
             store.pending[token] = {'id': video_id, 'filename': name, 'collection_id': payload.collection_id}

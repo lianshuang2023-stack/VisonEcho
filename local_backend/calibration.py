@@ -132,4 +132,8 @@ def register_calibration_routes(app, store, settings):
             task = store.data['calibrations'].get(task_id)
             if not task:
                 raise HTTPException(404, '字幕校准任务不存在。')
+            job = store.data['executions'].get(task.get('job_id'))
+            if not job:
+                raise HTTPException(404, '视频版本不存在。')
+            require_video(store.data, job.get('video_id'))
             return copy.deepcopy(task)
