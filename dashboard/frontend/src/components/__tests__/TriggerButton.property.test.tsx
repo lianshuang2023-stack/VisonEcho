@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, within } from "@testing-library/react";
 import * as fc from "fast-check";
 import TriggerButton from "../TriggerButton";
 
@@ -9,15 +9,15 @@ import TriggerButton from "../TriggerButton";
  *
  * For any combination of `disabled` (boolean) and `loading` (boolean) props,
  * the rendered button element's `disabled` attribute should be `true` when either
- * `disabled` or `loading` is `true`, and the `onClick` handler should only be
- * invocable when the button is not disabled.
+ * `disabled` or `loading` is `true`. An enabled button must show a cost
+ * confirmation before invoking `onClick`; cancelling must not invoke it.
  */
 describe("Property 3: TriggerButton disabled state is correct for all prop combinations", () => {
-  it("button is disabled when either disabled or loading is true, enabled only when both are false", () => {
+  it("only enabled buttons can open confirmation, and execution requires confirming", () => {
     fc.assert(
       fc.property(fc.boolean(), fc.boolean(), (disabled, loading) => {
         const onClick = vi.fn();
-        const { container } = render(
+        const { container, unmount } = render(
           <TriggerButton
             disabled={disabled}
             loading={loading}
@@ -25,21 +25,44 @@ describe("Property 3: TriggerButton disabled state is correct for all prop combi
           />,
         );
 
-        const button = container.querySelector("button")!;
-        const shouldBeDisabled = disabled || loading;
+        try {
+          const view = within(container);
+          const button = view.getByRole("button", {
+            name: loading ? "Starting…" : "Trigger Pipeline",
+          });
+          const shouldBeDisabled = disabled || loading;
 
-        expect(button.disabled).toBe(shouldBeDisabled);
+          if (shouldBeDisabled) {
+            expect(button).toBeDisabled();
+          } else {
+            expect(button).toBeEnabled();
+          }
 
-        // Attempt to click the button
-        fireEvent.click(button);
-
-        if (shouldBeDisabled) {
+          fireEvent.click(button);
           expect(onClick).not.toHaveBeenCalled();
-        } else {
-          expect(onClick).toHaveBeenCalledTimes(1);
-        }
 
-        container.remove();
+          if (shouldBeDisabled) {
+            expect(view.queryByRole("button", { name: "Confirm" })).toBeNull();
+            return;
+          }
+
+          expect(view.getByText(/This will incur AWS costs/)).toBeVisible();
+          expect(view.getByRole("button", { name: "Confirm" })).toBeEnabled();
+
+          fireEvent.click(view.getByRole("button", { name: "Cancel" }));
+          expect(onClick).not.toHaveBeenCalled();
+          expect(view.queryByRole("button", { name: "Confirm" })).toBeNull();
+
+          fireEvent.click(view.getByRole("button", { name: "Trigger Pipeline" }));
+          expect(onClick).not.toHaveBeenCalled();
+          fireEvent.click(view.getByRole("button", { name: "Confirm" }));
+          expect(onClick).toHaveBeenCalledTimes(1);
+          expect(view.getByRole("button", { name: "Trigger Pipeline" })).toBeEnabled();
+          expect(view.queryByRole("button", { name: "Confirm" })).toBeNull();
+        } finally {
+          unmount();
+          container.remove();
+        }
       }),
       { numRuns: 100 },
     );

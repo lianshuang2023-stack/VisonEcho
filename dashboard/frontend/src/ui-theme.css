@@ -1,0 +1,89 @@
+/* Interface preferences are independent from media language and audio settings. */
+.ve-header-controls { display:flex; align-items:center; gap:8px; margin-left:auto; }
+.ve-preference-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; height:36px; min-width:36px; padding:7px 10px; background:transparent; border:1px solid transparent; border-radius:8px; color:#476052; font-size:12px!important; white-space:nowrap; }
+.ve-preference-button:hover { background:#e8f0e8; border-color:#d5e0d6; }
+.ve-theme-toggle { padding:7px; }
+.ve-header-controls .ws-menu > button { white-space:nowrap; }
+:root[data-ui-theme=dark] body { background:#111b16; }
+:root[data-ui-theme=dark] .ws-app { color-scheme:dark; --ws-bg:#111b16; --ws-panel:#1a2821; --ws-line:#35483c; --ws-muted:#b0bdb2; --ws-text:#e6eee7; --ws-teal:#88c8b7; --ve-accent:#89cebb; --ve-accent-soft:#203b30; --ve-ink:#e8f0e9; --ve-muted:#adbdaf; background:#111b16; color:#e6eee7; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-workbench-header,.ws-topbar) { background:#142019; border-color:#304437; }
+:root[data-ui-theme=dark] .ws-app .ws-brand { color:#edf4ed; }
+:root[data-ui-theme=dark] .ws-app .ws-brand-mark { background:#88c8b7; color:#11281e; }
+:root[data-ui-theme=dark] .ws-app :is(.ve-preference-button,.ws-menu > button,.ws-icon-button) { color:#bbd0bf; }
+:root[data-ui-theme=dark] .ws-app :is(.ve-preference-button,.ws-menu > button,.ws-icon-button):hover { background:#263c2f; border-color:#3c5241; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-works-heading h1,.ws-studio-title h1,.ws-modal-head h2,.ws-section-title h2,.ve-comparison-heading h3,.ws-work-title) { color:#e8f0e9; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-work-card,.ws-player-panel,.ws-settings-panel,.ws-editor-panel,.ws-modal,.ws-menu-popover,.ws-export-menu > div,.ws-trash-row) { background:#1a2821; border-color:#354b3c; box-shadow:none; }
+:root[data-ui-theme=dark] .ws-app .ws-work-card:hover { border-color:#6e9b82; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-work-open,.ws-work-body) { background:transparent; color:#e6eee7; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-search,input,select,textarea,.ws-toolbar-select select,.ve-filter-toggle) { background:#213329; color:#e5eee5; border-color:#425b47; }
+:root[data-ui-theme=dark] .ws-app .ws-search input { background:transparent; border:0; }
+:root[data-ui-theme=dark] .ws-app input::placeholder,:root[data-ui-theme=dark] .ws-app textarea::placeholder { color:#a5b7a8; }
+:root[data-ui-theme=dark] .ws-app select option { background:#213329; color:#e5eee5; }
+:root[data-ui-theme=dark] .ws-app :is(input,select,textarea):focus { border-color:#8ccab3; box-shadow:0 0 0 3px #a3d4ae20; }
+:root[data-ui-theme=dark] .ws-app :is(button,a,summary):focus-visible { outline-color:#9ac9ac; }
+:root[data-ui-theme=dark] .ws-app .ws-works-toolbar .ws-toolbar-select::after { border-color:#b4c9b7; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-work-project,.ws-work-footer,.ws-work-next,.ve-library-scope,.ve-results-summary,.ws-field,.ws-field small,.ws-toolbar-select,.ws-back,.ws-studio-heading p,.ws-version-bar,.ws-player-footer,.ws-player-footer>button,.ws-cue-head>button,.ws-cue-foot,.ws-cue-index,.ws-cue-time-fields,.ws-editor-actions>p,.ws-editor-actions>small,.ws-editor-subheading,.ws-subtitle-downloads a,.ws-upload-hint,.ws-modal-intro,.ws-confirm-copy,.ws-settings-content,.ws-settings-content p,.ws-settings-help,.ws-settings-list dt,.ws-trash-info p,.ws-collection-manager-head,.ws-collection-row>div>span,.ve-comparison-heading p,.ve-comparison-notice,.ve-comparison-unavailable,.ve-comparison-track-label,.ve-comparison-track-empty,.ve-comparison-timeline-scale,.ve-comparison-timeline-heading output) { color:#b0c2b2; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-work-next,.ws-text-button,.ve-library-scope button,.ve-results-summary button) { color:#91cfb9; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-button.primary,.ve-comparison-switch button[aria-pressed=true]) { background:#87c8b2; border-color:#87c8b2; color:#11271b; }
+:root[data-ui-theme=dark] .ws-app .ws-button.primary:hover:not(:disabled) { background:#a7dcc5; border-color:#a7dcc5; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-button.secondary,.ws-button.ghost) { color:#c6deca; background:#243a2d; border-color:#466149; }
+:root[data-ui-theme=dark] .ws-app .ws-button.danger { color:#f2c7b8; background:#503329; border-color:#855b45; }
+:root[data-ui-theme=dark] .ws-app .ws-button:disabled { opacity:.45; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-work-menu>button) { background:#16291de8; color:#dcebdc; border-color:#59775b; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-menu-popover>button,.ws-export-menu a) { color:#d1e0ce; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-menu-popover>button,.ws-export-menu a):hover { background:#2b4433; }
+:root[data-ui-theme=dark] .ws-app .ws-menu-popover>.ws-menu-danger { color:#edb5a0; }
+:root[data-ui-theme=dark] .ws-app :is(.ve-compare-trigger,.ws-version-bar,.ws-editor-actions,.ve-extra-filters,.ve-comparison-switch,.ws-confirm-facts) { color:#c2d6be; background:#20362a; border-color:#3c5440; }
+:root[data-ui-theme=dark] .ws-app :is(.ve-compare-trigger span:last-child,.ws-version-bar select,.ws-settings-list dd,.ws-collection-row strong,.ws-settings-content h3,.ws-trash-info h2,.ws-confirm-facts strong,.ve-comparison-timeline-heading strong) { color:#d9e9d5; }
+:root[data-ui-theme=dark] .ws-app .ve-compare-trigger:hover { background:#2a4634; }
+:root[data-ui-theme=dark] .ws-app .ve-filter-toggle.active { background:#294b37!important; color:#a9d9b8!important; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-work-status,.ws-workflow-badge) { background:#2b3c2b; color:#c7d8b7; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-work-status.review,.ws-workflow-badge.review) { background:#493f27; color:#efd69a; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-work-status.exportable,.ws-workflow-badge.exportable) { background:#244630; color:#b6e2b1; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-work-status.processing,.ws-workflow-badge.processing) { background:#273d49; color:#b5d8ea; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-work-status.failed,.ws-workflow-badge.failed) { background:#4a3028; color:#f0bdab; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-work-archived,.ws-archive-tag) { background:#29372b; border-color:#4a5a43; color:#c0cbb4; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-work-error,.ws-cue-reason,.ws-editor-actions .ws-validation-error,.ws-export-menu small) { color:#e0b18a; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-alert,.ws-setup-notice) { color:#efd0ad; background:#403325; border-color:#705d42; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-notice,.ws-alert.success,.ws-progress-panel) { color:#c0dab3; background:#253e2b; border-color:#476245; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-notice button,.ws-progress-title,.ws-progress-title strong,.ws-steps li.succeeded,.ws-steps li.running,.ws-settings-status.ready,.ws-calibration-status) { color:#b4d9ad; }
+:root[data-ui-theme=dark] .ws-app .ws-steps li>span { background:#3c5439; color:#d0e0ba; }
+:root[data-ui-theme=dark] .ws-app .ws-modal-backdrop { background:#020905b8; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-empty,.ws-works-empty,.ws-dropzone,.ws-cover-fallback,.ve-comparison-media-empty) { background:#1d3023; color:#b2c5a5; border-color:#40583c; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-empty h2,.ws-dropzone h3,.ws-editor-empty h3,.ws-inline-empty h3) { color:#d0e0c3; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-empty p,.ws-dropzone p,.ws-editor-empty p,.ws-inline-empty p,.ws-loading) { color:#adc2a0; }
+:root[data-ui-theme=dark] .ws-app .ws-dropzone.dragging { background:#2b4932; border-color:#92b27e; }
+:root[data-ui-theme=dark] .ws-app .ws-cue { background:#203427; border-color:#38503a; }
+:root[data-ui-theme=dark] .ws-app .ws-cue.current { background:#294730; border-color:#749b65; }
+:root[data-ui-theme=dark] .ws-app .ws-cue textarea { color:#e0edda; background:transparent; border-color:transparent; }
+:root[data-ui-theme=dark] .ws-app .ws-cue textarea:focus { background:#1c3023; border-color:#87b176; }
+:root[data-ui-theme=dark] .ws-app .ws-cue-time-fields input { background:#172b1e; border-color:#486341; color:#d9e8d0; }
+:root[data-ui-theme=dark] .ws-app .ws-cue-list { scrollbar-color:#576c4b transparent; }
+:root[data-ui-theme=dark] .ws-app :is(.ws-editor-tabs,.ws-editor-actions,.ws-collection-row) { border-color:#364c36; }
+:root[data-ui-theme=dark] .ws-app .ws-editor-tabs button { color:#b1c5a1; }
+:root[data-ui-theme=dark] .ws-app .ws-editor-tabs button.active { color:#d9efc8; border-bottom-color:#95c982; }
+:root[data-ui-theme=dark] .ws-app .ws-editor-tabs button>span { color:#c0d4ad; background:#324c31; }
+:root[data-ui-theme=dark] .ws-app .ws-cue-pass { color:#b4d49e; }
+:root[data-ui-theme=dark] .ws-app .ws-cue-skipped { color:#e0c396; }
+:root[data-ui-theme=dark] .ws-app .ws-source-tabs button { color:#b3c7a3; }
+:root[data-ui-theme=dark] .ws-app .ws-source-tabs button.active { color:#daf0c9; background:#354e31; }
+:root[data-ui-theme=dark] .ws-app .ve-comparison-track { background:repeating-linear-gradient(90deg,#3e5638 0 1px,transparent 1px 10%),#293f27; }
+:root[data-ui-theme=dark] .ws-app .ve-comparison-cue { background:#6f9669; border-color:#99b88b; }
+:root[data-ui-theme=dark] .ws-app .described .ve-comparison-cue { background:#64b49d; border-color:#9ad8bb; }
+:root[data-ui-theme=dark] .ws-app .ve-comparison-playhead { background:#d4e9bd; }
+:root[data-ui-theme=dark] .ws-app .ve-comparison-text-cue { background:#203923; border-color:#3a5737; }
+:root[data-ui-theme=dark] .ws-app .ve-comparison-text-cue.active { background:#2a492e; border-color:#83ac73; }
+:root[data-ui-theme=dark] .ws-app .ve-comparison-text-cue>span { color:#b0c79c; }
+:root[data-ui-theme=dark] .ws-app .ve-comparison-text-cue p { color:#e0edcf; }
+:root[data-ui-theme=dark] .ws-app .ve-comparison-actions { background:#1a2821; }
+:root[data-ui-theme=dark] .ws-app .ve-comparison-media-error { background:#16271cdd; }
+:root[data-ui-theme=dark] .ws-app .ve-skeleton-card { background:#192b1f; border-color:#344d32; }
+:root[data-ui-theme=dark] .ws-app .ve-skeleton-card>div,:root[data-ui-theme=dark] .ws-app .ve-skeleton-card span { background:#2b4430; }
+@media(max-width:640px) {
+ .ve-header-controls { gap:2px; }
+ .ve-preference-button { padding:7px; gap:4px; }
+ .ve-header-controls .ws-menu>button { padding:7px; font-size:12px; }
+ .ve-atelier .ws-workbench-header { padding-left:14px; padding-right:14px; gap:10px; }
+ .ve-atelier .ws-brand { font-size:19px; gap:7px; }
+ .ve-atelier .ws-brand-mark { width:30px; height:30px; }
+}

@@ -1,4 +1,12 @@
-# Automated Audio Description Using Generative AI
+# VisionEcho
+
+本地视频无障碍工作室：中英文对白识别、字幕校准、可选解说音色、口述稿编辑与版本管理。
+
+运行方式：在仓库根目录执行 `./run-local.sh`，打开 <http://127.0.0.1:5174/>。详见 [本地运行说明](RUN-LOCAL.zh-CN.md)。
+
+本项目基于下方 AWS 示例扩展了 Azure + 本地处理模式，原始示例说明与许可证保留。
+
+## Original AWS sample: Automated Audio Description Using Generative AI
 
 A serverless pipeline that automatically generates **Descriptive Video Information (DVI)** — spoken narrations of visual content inserted during silence gaps in videos — to improve media accessibility for visually impaired audiences.
 

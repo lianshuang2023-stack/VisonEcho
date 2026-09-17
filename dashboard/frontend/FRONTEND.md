@@ -53,6 +53,36 @@ src/
 
 ## Build & test
 
+### Local Azure mode
+
+The Azure backend runs separately on `127.0.0.1:8000`. Enable this mode explicitly:
+
+```bash
+VITE_LOCAL_BACKEND=true npm run dev -- --host 127.0.0.1 --port 5174 --strictPort
+```
+
+Alternatively, copy `.env.local.example` to `.env.local`. Vite proxies `/api/*`,
+including upload PUTs and video playback, to the local backend without rewriting
+the path. This proxy is enabled for development and preview only in local mode.
+Both default to port 5174 in local mode, matching the backend origin allowlist.
+For a static local build, build with `VITE_LOCAL_BACKEND=true npm run build` and
+serve it behind a same-origin `/api` route to the backend. Keep the server bound
+to loopback: this mode is intended for use on the local computer.
+
+Only the exact value `VITE_LOCAL_BACKEND=true` skips Cognito and opens Process
+directly. When absent or false, the original AWS login and cost pages remain.
+The UI reads `GET /api/health` for `{status, provider, model, configured,
+speech_region_configured, issues}`. A reachable but unconfigured backend still
+allows uploads and viewing; processing is disabled until the required
+configuration is present. Use **Recheck configuration** after backend changes.
+This check reports configuration presence, not a live cloud service probe.
+
+Azure OpenAI and Speech API keys must stay in the backend environment. Never add
+keys to any `VITE_*` variable, browser storage, or frontend file. The local UI
+shows Azure usage guidance instead of applying AWS price estimates.
+
+### Commands
+
 - `npm run build` → `tsc -b && vite build`, emits `dist/`, which CDK deploys to the
   hosting bucket. `vite.config.ts` sets `define: { global: "globalThis" }` (required by
   `amazon-cognito-identity-js` in the browser — don't remove it).

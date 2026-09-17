@@ -34,6 +34,13 @@ cdk-outputs.json
 .env
 .env.local
 .env.*.local
+.local-data/
+.pytest_cache/
+
+# Local reports and intermediate UI copy (not application source)
+output/
+VIDEO-WORKSPACE-NOTES.zh-CN.md
+dashboard/frontend/src/homeTranslations.json
 
 # Build artifacts
 *.zip

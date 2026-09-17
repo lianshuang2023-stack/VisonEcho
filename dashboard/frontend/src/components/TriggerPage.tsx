@@ -10,12 +10,18 @@ import PreviewPlayer from "./PreviewPlayer";
 import TriggerButton from "./TriggerButton";
 import ExecutionProgress from "./ExecutionProgress";
 import VideoUpload from "./VideoUpload";
+import { IS_LOCAL_BACKEND } from "../config";
 
 const TERMINAL_STATES = ["SUCCEEDED", "FAILED", "TIMED_OUT", "ABORTED"];
 const POLL_INTERVAL_MS = 10_000;
-const STORAGE_KEY = "dvi-active-execution";
+const STORAGE_KEY = IS_LOCAL_BACKEND ? "dvi-local-active-execution" : "dvi-active-execution";
 
-function TriggerPage() {
+interface TriggerPageProps {
+  processingReady?: boolean;
+  onExecutionComplete?: () => void;
+}
+
+function TriggerPage({ processingReady = true, onExecutionComplete }: TriggerPageProps) {
   const [selectedVideo, setSelectedVideo] = useState<InputVideo | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -45,6 +51,7 @@ function TriggerPage() {
           setExecutionStatus(status);
           if (TERMINAL_STATES.includes(status.status)) {
             localStorage.removeItem(STORAGE_KEY);
+            if (status.status === "SUCCEEDED") onExecutionComplete?.();
             return;
           }
           pollingRef.current = setInterval(async () => {
@@ -54,6 +61,7 @@ function TriggerPage() {
               if (TERMINAL_STATES.includes(s.status)) {
                 stopPolling();
                 localStorage.removeItem(STORAGE_KEY);
+                if (s.status === "SUCCEEDED") onExecutionComplete?.();
               }
             } catch (err) {
               console.error("Failed to fetch execution status:", err);
@@ -64,7 +72,7 @@ function TriggerPage() {
           console.error("Failed to fetch execution status:", err);
         });
     },
-    [stopPolling],
+    [stopPolling, onExecutionComplete],
   );
 
   // On mount, check if there's an active execution to resume
@@ -105,7 +113,7 @@ function TriggerPage() {
   }, []);
 
   const handleTrigger = useCallback(async () => {
-    if (!selectedVideo) return;
+    if (!selectedVideo || !processingReady) return;
 
     setTriggerLoading(true);
     setTriggerError(null);
@@ -134,7 +142,7 @@ function TriggerPage() {
     } finally {
       setTriggerLoading(false);
     }
-  }, [selectedVideo, startPolling]);
+  }, [selectedVideo, minSilenceGap, processingReady, startPolling]);
 
   return (
     <div className="flex flex-1 min-h-0 flex-col md:flex-row">
@@ -175,10 +183,13 @@ function TriggerPage() {
 
         <div className="flex flex-col gap-3">
           <TriggerButton
-            disabled={selectedVideo === null}
+            disabled={selectedVideo === null || !processingReady || executionStatus?.status === "RUNNING"}
             loading={triggerLoading}
             onClick={handleTrigger}
           />
+          {IS_LOCAL_BACKEND && !processingReady && (
+            <p className="text-xs text-[var(--on-surface-muted)]">Complete the backend setup shown above before starting processing.</p>
+          )}
         </div>
 
         {executionStatus && selectedVideo && (

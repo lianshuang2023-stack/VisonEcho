@@ -1,4 +1,5 @@
 import { getIdToken } from "./auth";
+import { IS_LOCAL_BACKEND } from "./config";
 import type {
   VideoEntry,
   DviSegment,
@@ -7,11 +8,13 @@ import type {
   ExecutionStatus,
   ExecutionListItem,
   CostReport,
+  BackendHealth,
 } from "./types";
 
 const API_BASE = "/api";
 
 async function authHeaders(): Promise<Record<string, string>> {
+  if (IS_LOCAL_BACKEND) return {};
   const token = await getIdToken();
   if (!token) {
     throw new Error("Not authenticated");
@@ -19,6 +22,20 @@ async function authHeaders(): Promise<Record<string, string>> {
   return {
     Authorization: token,
   };
+}
+
+export async function fetchBackendHealth(): Promise<BackendHealth> {
+  if (!IS_LOCAL_BACKEND) throw new Error("Local backend mode is not enabled");
+  const res = await fetch(`${API_BASE}/health`, {
+    signal: AbortSignal.timeout(10_000),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error("The local backend is not responding. Start the backend on port 8000, then recheck.");
+  const data = await res.json();
+  if (data.status !== "ok" || data.provider !== "azure") {
+    throw new Error("The local backend did not return a valid Azure configuration status.");
+  }
+  return data;
 }
 
 export async function fetchVideos(): Promise<VideoEntry[]> {
@@ -78,13 +95,14 @@ export async function fetchInputVideoUrl(videoId: string): Promise<string> {
 export async function uploadVideo(
   file: File,
   onProgress?: (percent: number) => void,
+  collectionId?: string,
 ): Promise<{ key: string }> {
   const headers = await authHeaders();
-  // Get presigned URL
+  // Get an upload URL from the selected backend.
   const res = await fetch(`${API_BASE}/trigger/upload`, {
     method: "POST",
     headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({ filename: file.name }),
+    body: JSON.stringify({ filename: file.name, ...(IS_LOCAL_BACKEND && collectionId ? { collection_id: collectionId } : {}) }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -92,7 +110,7 @@ export async function uploadVideo(
   }
   const { url, key } = await res.json();
 
-  // Upload file directly to S3 via presigned URL
+  // Accept either an S3 presigned URL or a same-origin /api/ local upload URL.
   await new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", url);
@@ -104,7 +122,16 @@ export async function uploadVideo(
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) resolve();
-      else reject(new Error(`Upload failed with status ${xhr.status}`));
+      else {
+        let message = `Upload failed with status ${xhr.status}`;
+        if (IS_LOCAL_BACKEND) {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            if (typeof data.error === "string") message = data.error;
+          } catch { /* Preserve the status for non-JSON server failures. */ }
+        }
+        reject(new Error(message));
+      }
     };
     xhr.onerror = () => reject(new Error("Upload failed"));
     xhr.send(file);

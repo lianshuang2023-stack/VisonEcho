@@ -1,4 +1,5 @@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { IS_LOCAL_BACKEND } from "../config";
 
 type Page = "viewer" | "trigger" | "cost";
 
@@ -10,7 +11,7 @@ interface NavBarProps {
 const tabs: { page: Page; label: string }[] = [
   { page: "trigger", label: "Process" },
   { page: "viewer", label: "Viewer" },
-  { page: "cost", label: "Cost Estimation" },
+  { page: "cost", label: IS_LOCAL_BACKEND ? "Usage & Costs" : "Cost Estimation" },
 ];
 
 function NavBar({ activePage, onNavigate }: NavBarProps) {

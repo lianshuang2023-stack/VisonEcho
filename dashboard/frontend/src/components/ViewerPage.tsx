@@ -5,6 +5,7 @@ import VideoSelector from "./VideoSelector";
 import VideoPlayer from "./VideoPlayer";
 import SegmentPanel from "./SegmentPanel";
 import SummaryBar from "./SummaryBar";
+import { IS_LOCAL_BACKEND } from "../config";
 
 export interface VideoPlayerHandle {
   seekTo: (time: number) => void;
@@ -13,9 +14,7 @@ export interface VideoPlayerHandle {
 export type VideoPlayerRef = VideoPlayerHandle;
 
 function ViewerPage() {
-  // Used by handleVideoSelect and SummaryBar integration
   const [selectedVideo, setSelectedVideo] = useState<VideoEntry | null>(null);
-  void selectedVideo;
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [segments, setSegments] = useState<DviSegment[]>([]);
   const [summary, setSummary] = useState<ProcessingSummary | null>(null);
@@ -97,6 +96,15 @@ function ViewerPage() {
     <div className="flex flex-col flex-1 gap-4 p-4">
       <div className="flex-none">
         <VideoSelector onSelect={handleVideoSelect} />
+        {IS_LOCAL_BACKEND && selectedVideo && videoUrl && (
+          <a
+            href={`/api/media/output/${encodeURIComponent(selectedVideo.video_id)}?download=true`}
+            download
+            className="mt-3 inline-flex rounded-[var(--radius-md)] bg-[var(--surface-container-high)] px-4 py-2 text-sm font-semibold text-[var(--on-surface)] hover:bg-[var(--surface-container-highest)]"
+          >
+            Download described MP4
+          </a>
+        )}
       </div>
 
       {summary && (

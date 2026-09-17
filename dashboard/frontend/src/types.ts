@@ -1,3 +1,28 @@
+export interface SpeechVoice {
+  id: string;
+  label: string;
+  gender?: string;
+}
+
+export interface SpeechLanguage {
+  id: 'en-US' | 'zh-CN';
+  label: string;
+  voice?: string;
+  voices?: SpeechVoice[];
+}
+
+export interface BackendHealth {
+  status: "ok";
+  provider: "azure";
+  model: string;
+  speech_region_configured: boolean;
+  configured: boolean;
+  issues: string[];
+  max_video_seconds?: number;
+  max_upload_mb?: number;
+  languages?: SpeechLanguage[];
+}
+
 export interface VideoEntry {
   key: string;
   filename: string;

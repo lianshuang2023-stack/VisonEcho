@@ -16,7 +16,7 @@ function VideoUpload({ onUploadComplete }: VideoUploadProps) {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.name.endsWith(".mp4")) {
+    if (!file.name.toLowerCase().endsWith(".mp4")) {
       setError("Only MP4 files are supported.");
       return;
     }

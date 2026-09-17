@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { IS_LOCAL_BACKEND } from "../config";
 
 interface TriggerButtonProps {
   disabled: boolean;
@@ -13,6 +14,7 @@ function TriggerButton({ disabled, loading, onClick }: TriggerButtonProps) {
   const [confirming, setConfirming] = useState(false);
 
   const handleClick = () => {
+    if (isDisabled) return;
     if (!confirming) {
       setConfirming(true);
       return;
@@ -29,11 +31,14 @@ function TriggerButton({ disabled, loading, onClick }: TriggerButtonProps) {
     return (
       <div className="inline-flex items-center gap-2">
         <span className="text-sm text-[var(--on-surface-muted)]">
-          This will incur AWS costs (~$0.15–$0.30). Continue?
+          {IS_LOCAL_BACKEND
+            ? "This uses paid Azure OpenAI and Speech services. Charges depend on usage. Continue?"
+            : "This will incur AWS costs (~$0.15–$0.30). Continue?"}
         </span>
         <Button
           type="button"
           onClick={handleClick}
+          disabled={isDisabled}
           className="px-4 py-2 rounded-[var(--radius-md)] font-semibold text-sm bg-gradient-to-br from-[var(--primary-light)] to-[var(--primary)] text-[var(--surface)] hover:brightness-110"
         >
           Confirm
@@ -56,7 +61,9 @@ function TriggerButton({ disabled, loading, onClick }: TriggerButtonProps) {
       disabled={isDisabled}
       onClick={handleClick}
       title={
-        disabled && !loading ? "Select a video and pipeline version" : undefined
+        disabled && !loading
+          ? IS_LOCAL_BACKEND ? "Select a video and complete backend setup" : "Select a video and pipeline version"
+          : undefined
       }
       className={cn(
         "inline-flex items-center gap-2 px-6 py-3 rounded-[var(--radius-md)] font-semibold text-[15px]",

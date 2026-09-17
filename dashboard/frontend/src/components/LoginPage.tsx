@@ -66,7 +66,7 @@ function LoginPage({ onLoginSuccess }: LoginPageProps) {
     <div className="flex items-center justify-center min-h-screen bg-[var(--surface)]">
       <div className="w-full max-w-md p-8 bg-[var(--surface-container)] rounded-lg shadow-lg">
         <h1 className="text-2xl font-semibold text-center text-[var(--on-surface)] mb-6">
-          DVI Dashboard
+          VisionEcho
         </h1>
         <p className="text-sm text-center text-[var(--on-surface-muted)] mb-8">
           Sign in to access the dashboard

@@ -100,7 +100,7 @@ function SegmentPanel({
     return (
       <div className="flex flex-col h-full bg-[var(--surface-container-low)]">
         <div className="flex items-center justify-center h-full text-[var(--on-surface-muted)] text-sm">
-          No DVI segments found for this video
+          No audio descriptions found for this video
         </div>
       </div>
     );
