@@ -1,91 +1,54 @@
-# Dashboard Frontend
+# VisionEcho 前端开发说明
 
-A small React 19 + TypeScript single-page app (built with Vite 8) that runs the DVI
-dashboard. It's served as static files from S3 behind CloudFront; CloudFront proxies
-`/api/*` to API Gateway, so the app makes same-origin calls with no CORS in normal use.
+前端为 React 19 + TypeScript 单页应用，使用 Vite 8 构建。页面围绕作品管理、口述制作和字幕校对组织。
 
-## Layout
+## 页面与代码
 
-```
-src/
-  main.tsx            # React entry point
-  App.tsx             # Auth gate + page switching (no router)
-  api.ts              # The single network layer — all fetch calls live here
-  auth.ts             # Cognito (SRP) wrapper; config loaded at runtime
-  types.ts            # Shared TypeScript interfaces for API payloads
-  components/         # Page + feature components
-    ui/               # shadcn/ui primitives (new-york style)
-  lib/utils.ts        # cn() class-merge helper
-  utils/              # small pure helpers (e.g. formatTime)
-  index.css           # Tailwind v4 import + design tokens (@theme + :root)
-```
+| 文件 | 职责 |
+|---|---|
+| `src/App.tsx` | 应用入口及运行模式选择 |
+| `src/components/LocalVideoWorkspace.tsx` | 我的作品、搜索筛选、项目管理、上传与回收站 |
+| `src/components/workspace/ProjectStudio.tsx` | 生成设置、历史版本、播放器、口述稿和字幕编辑 |
+| `src/components/workspace/ComparisonPreview.tsx` | 原声与口述版对比预览 |
+| `src/components/workspace/timeline.ts` | 原片与扩展口述的时间映射 |
+| `src/localWorkspaceApi.ts` | 作品、校准、配音与导出的类型和请求 |
+| `src/api.ts` | 上传、媒体地址、执行状态和后端配置请求 |
+| `src/UiPreferencesProvider.tsx` | 页面语言与主题状态 |
+| `src/workspace.css`、`src/ui-theme.css` | 工作区布局与亮暗主题 |
 
-## Key decisions
+## 本地运行
 
-- **No router.** `App.tsx` holds an `activePage` state (`viewer` / `trigger` / `cost`)
-  and toggles each page with `display: contents | none`. Pages stay mounted, so things
-  like the Trigger page's live execution polling keep running when you switch tabs.
-  Everything is gated behind an auth check that renders `LoginPage` until a Cognito
-  session exists. Note: the internal page keys differ from the displayed tab labels in
-  `NavBar.tsx` — `trigger` shows as **"Process"**, `viewer` as **"Viewer"**, and `cost`
-  as **"Cost Estimation"**; `trigger` (Process) is the default landing page.
-- **One API layer (`api.ts`).** Components never call `fetch` directly — they import
-  typed functions. Each function calls `authHeaders()` (which throws if unauthenticated),
-  checks `res.ok`, and unwraps the relevant field from the JSON envelope. New endpoints
-  follow the same shape and add their response type to `types.ts`.
-- **Auth (`auth.ts`).** Amazon Cognito via `amazon-cognito-identity-js` (SRP flow). The
-  ID-token JWT is attached as the `Authorization` header on every API call. Cognito IDs
-  are **not** hardcoded — they're loaded at runtime from `/auth-config.json`, which CDK
-  generates at deploy time with the live pool/client IDs.
-- **Styling: Tailwind CSS v4 + shadcn/ui.** App-specific styles use arbitrary-value
-  utilities bound to CSS variables (e.g. `bg-[var(--surface-container-low)]`). The
-  shadcn primitives in `components/ui` use bare token utilities (`bg-popover`,
-  `bg-accent`, …). In Tailwind v4 those utilities only exist if the tokens are registered
-  in an `@theme` block, so `index.css` keeps raw values in `:root` **and** exposes them
-  via `@theme inline { --color-popover: var(--popover); … }`. Without that mapping the
-  primitives render with no background (a transparent dropdown/popover) — keep it in sync
-  when adding tokens.
-- **State.** Local React state + hooks only; no global store. The Trigger page persists
-  the active execution ARN to `localStorage` so a page refresh resumes status polling.
-- **Upload.** The Process (Trigger) page includes a `VideoUpload` component that uploads
-  an MP4 straight to the pipeline bucket's `input/` prefix via a presigned PUT URL
-  (`POST /api/trigger/upload`), so users can add source videos without leaving the UI.
-
-## Build & test
-
-### Local Azure mode
-
-The Azure backend runs separately on `127.0.0.1:8000`. Enable this mode explicitly:
+从仓库根目录运行 `./run-local.sh` 可同时启动前后端。单独启动前端时，先保证 FastAPI 后端运行于 `127.0.0.1:8000`。
 
 ```bash
+cd dashboard/frontend
+npm ci
 VITE_LOCAL_BACKEND=true npm run dev -- --host 127.0.0.1 --port 5174 --strictPort
 ```
 
-Alternatively, copy `.env.local.example` to `.env.local`. Vite proxies `/api/*`,
-including upload PUTs and video playback, to the local backend without rewriting
-the path. This proxy is enabled for development and preview only in local mode.
-Both default to port 5174 in local mode, matching the backend origin allowlist.
-For a static local build, build with `VITE_LOCAL_BACKEND=true npm run build` and
-serve it behind a same-origin `/api` route to the backend. Keep the server bound
-to loopback: this mode is intended for use on the local computer.
+也可复制 `.env.local.example` 为 `.env.local`。Vite 在开发和预览模式下将 `/api/*` 转发至本地后端，包含上传与视频请求。只有 `VITE_LOCAL_BACKEND=true` 才会启用 VisionEcho 本地工作区。
 
-Only the exact value `VITE_LOCAL_BACKEND=true` skips Cognito and opens Process
-directly. When absent or false, the original AWS login and cost pages remain.
-The UI reads `GET /api/health` for `{status, provider, model, configured,
-speech_region_configured, issues}`. A reachable but unconfigured backend still
-allows uploads and viewing; processing is disabled until the required
-configuration is present. Use **Recheck configuration** after backend changes.
-This check reports configuration presence, not a live cloud service probe.
+## 交互与数据
 
-Azure OpenAI and Speech API keys must stay in the backend environment. Never add
-keys to any `VITE_*` variable, browser storage, or frontend file. The local UI
-shows Azure usage guidance instead of applying AWS price estimates.
+- 页面内保存当前作品与历史版本选择，后端维护作品和生成任务数据。
+- 新生成、重新配音均创建新版本；对白字幕保存使用修订号检查，防止覆盖其他窗口的修改。
+- 对白语言、解说语言和页面语言相互独立；换音色时保持当前版本的口述稿语言。
+- 扩展口述会增加成片时长。原片预览与口述版使用不同时间轴，字幕显示和跳转需使用时间映射。
+- 页面语言和主题保存在浏览器本地存储；视频、字幕及版本文件保存在后端工作区。
+- 字幕编辑影响预览与 SRT/VTT 下载，不会烧录进 MP4。
 
-### Commands
+## 构建与测试
 
-- `npm run build` → `tsc -b && vite build`, emits `dist/`, which CDK deploys to the
-  hosting bucket. `vite.config.ts` sets `define: { global: "globalThis" }` (required by
-  `amazon-cognito-identity-js` in the browser — don't remove it).
-- `npx vitest --run` for tests (Vitest + Testing Library, `jsdom`). Pure logic such as
-  cost math and time formatting is covered with `fast-check` property tests
-  (`*.property.test.ts`).
+```bash
+VITE_LOCAL_BACKEND=true npm run build
+./node_modules/.bin/vitest run
+npm run lint
+```
+
+生产构建输出到 `dist/`。本地静态服务需要把同源 `/api` 请求转发至 FastAPI，并保持仅监听本机。已知功能限制见[本地运行说明](../../RUN-LOCAL.zh-CN.md#当前已知限制)。
+
+## 配置边界
+
+Azure API 密钥只放在仓库根目录的后端 `.env.local` 中。任何 `VITE_*` 变量都会进入前端构建，不可用于保存密钥。
+
+`GET /api/health` 返回配置是否齐全、可用语言和上传限制；该请求不执行 Azure 连接测试。

@@ -65,8 +65,6 @@ VITE_LOCAL_BACKEND=true npm run build
 - [Speech SDK 词级时间与最终识别结果](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/get-speech-recognition-results?pivots=programming-language-python)
 - [Speech 自定义端点](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-services-private-link#construct-endpoint-url)
 
-原仓库 AWS 部署代码保留；显式本地模式使用 VisionEcho 工作区。
-
 ## 项目与回收站
 
 首页统一为“我的作品”，默认显示全部未归档视频，按最近编辑排序。项目用于分类与筛选，可通过“项目管理”新建、重命名和删除。旧默认项目在界面显示为“未分类”。
