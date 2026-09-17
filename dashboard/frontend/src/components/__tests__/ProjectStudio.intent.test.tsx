@@ -7,7 +7,7 @@ import type { StudioIntent } from '../workspace/ProjectStudio';
 import type { NarrationEditor, ProjectDetail, VideoProject } from '../../localWorkspaceApi';
 import type { ExecutionStatus } from '../../types';
 
-const mocks = vi.hoisted(() => ({ getProject: vi.fn(), getNarration: vi.fn(), getTranscript: vi.fn(), fetchInputVideoUrl: vi.fn(), fetchExecutionStatus: vi.fn(), generateNarration: vi.fn(), renderNarration: vi.fn(), calibrateTranscript: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getProject: vi.fn(), getNarration: vi.fn(), getTranscript: vi.fn(), fetchInputVideoUrl: vi.fn(), fetchExecutionStatus: vi.fn(), generateNarration: vi.fn(), renderNarration: vi.fn(), calibrateTranscript: vi.fn(), getSegmentEvidence: vi.fn(), saveEvidenceFeedback: vi.fn(), getCharacters: vi.fn(), saveCharacters: vi.fn() }));
 vi.mock('../../api', () => mocks);
 vi.mock('../../localWorkspaceApi', async importOriginal => ({ ...await importOriginal<typeof import('../../localWorkspaceApi')>(), ...mocks }));
 
@@ -33,7 +33,7 @@ beforeEach(() => {
   mocks.fetchInputVideoUrl.mockResolvedValue('/input.mp4');
   mocks.fetchExecutionStatus.mockResolvedValue({ ...job, status: 'RUNNING' });
 });
-afterEach(() => { cleanup(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.resetAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('studio card intent navigation', () => {
   it('keeps the default entry unchanged without automatically moving focus', async () => {
@@ -190,4 +190,47 @@ it('shows recognition uncertainty beside subtitle calibration without changing t
   expect(screen.getByRole('note')).toHaveTextContent('部分对白识别置信度较低，请核对原声。');
   expect(screen.getByDisplayValue('Hello, ocean.')).toBeVisible();
   expectNoCloudTask();
+});
+
+it('seeks an evidence frame in the original source timeline after switching from extended output', async () => {
+  mocks.getNarration.mockResolvedValue({ ...narration, narration_mode: 'extended', insertions: [{ source_time: 5, output_start: 5, output_end: 13, duration: 8 }], summary: { video_duration: 38 } });
+  mocks.getSegmentEvidence.mockResolvedValue({ segment_index: 0, source_start: 8, source_end: 14, provenance: 'model', frames: [{ id: 'f0', timestamp: 12, url: '/frame.jpg' }], observations: [], feedback: { revision: 0, issues: [], note: '' } });
+  renderStudio();
+  await screen.findByRole('textbox', { name: '口述稿 1' });
+  expect(screen.getByLabelText('口述解说视频播放器')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '查看画面依据' }));
+  fireEvent.click(await screen.findByRole('button', { name: '查看原片 00:12.000' }));
+  const original = screen.getByLabelText('原始视频播放器') as HTMLVideoElement;
+  fireEvent.loadedMetadata(original);
+  expect(original.currentTime).toBe(12);
+  expect(mocks.generateNarration).not.toHaveBeenCalled();
+});
+
+it('guards navigation while visual correction changes are unsaved', async () => {
+  const onBack = vi.fn();
+  mocks.getSegmentEvidence.mockResolvedValue({ segment_index: 0, source_start: 1, source_end: 5, provenance: 'review', frames: [], observations: [], feedback: { revision: 0, issues: [], note: '' } });
+  render(<ProjectStudio projectId="video-1" processingReady onBack={onBack} onSetup={vi.fn()} />);
+  await screen.findByRole('textbox', { name: '口述稿 1' });
+  fireEvent.click(screen.getByRole('button', { name: '查看画面依据' }));
+  fireEvent.change(await screen.findByRole('textbox', { name: '画面纠错说明' }), { target: { value: 'The action is incorrect.' } });
+  fireEvent.click(screen.getByRole('button', { name: '返回视频列表' }));
+  expect(onBack).not.toHaveBeenCalled();
+  expect(screen.getByRole('dialog', { name: '有未保存的编辑' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '继续编辑' }));
+  expect(screen.getByRole('textbox', { name: '画面纠错说明' })).toHaveValue('The action is incorrect.');
+});
+
+it('keeps editing locked until completed generation details have reconciled', async () => {
+  const running = { ...job, execution_arn: 'new-job', status: 'RUNNING' };
+  mocks.getProject.mockResolvedValueOnce({ ...detail, executions: [running, job] });
+  let resolveDetail!: (value: ProjectDetail) => void;
+  mocks.getProject.mockImplementationOnce(() => new Promise<ProjectDetail>(resolve => { resolveDetail = resolve; }));
+  mocks.fetchExecutionStatus.mockResolvedValue({ ...running, status: 'SUCCEEDED' });
+  renderStudio();
+  await screen.findByRole('textbox', { name: '口述稿 1' });
+  await waitFor(() => expect(mocks.getProject).toHaveBeenCalledTimes(2), { timeout: 2500 });
+  expect(screen.getByRole('textbox', { name: '口述稿 1' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '返回视频列表' })).toBeDisabled();
+  await act(async () => resolveDetail({ ...detail, latest_result_id: 'new-job', executions: [{ ...job, execution_arn: 'new-job' }, job] }));
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '口述稿 1' })).toBeEnabled());
 });

@@ -98,7 +98,8 @@ def run_job(store, job_id, video_id, min_gap, source_result=None, edits=None):
                        speech_language=job_config.get('language', store.settings.speech_language),
                        dialogue_language=job_config.get('dialogue_language', store.settings.dialogue_language),
                        azure_speech_voice=job_config.get('voice', store.settings.azure_speech_voice),
-                       narration_mode=job_config.get('narration_mode', 'auto'))
+                       narration_mode=job_config.get('narration_mode', 'auto'),
+                       character_context=copy.deepcopy(job_config.get('character_context', [])))
     def update_step(name, status, detail):
         with store.lock:
             job = store.data['executions'][job_id]
@@ -121,7 +122,7 @@ def run_job(store, job_id, video_id, min_gap, source_result=None, edits=None):
             result = render_revision(store.root / 'input' / f'{video_id}.mp4',
                                      store.root / 'runs' / job_id, settings, source_result, edits, update_step)
         result.update(language=settings.speech_language, dialogue_language=settings.dialogue_language,
-                      voice=settings.azure_speech_voice)
+                      voice=settings.azure_speech_voice, character_context=settings.character_context)
         if job_config.get('source_execution_id'):
             result['source_execution_id'] = job_config['source_execution_id']
         path = Path(result['output_path']).resolve()
@@ -165,6 +166,9 @@ def enqueue_job(store, background, video_id, min_gap=2, language=None, source_re
     job_id, started = uuid.uuid4().hex, now()
     steps = STEPS if source_result is None else ['ValidateInput', 'SynthesizeAudio', 'MixAudioTracks', 'RecordSummary']
     try:
+        from .characters import confirmed_character_context
+        character_context = (confirmed_character_context(store, video_id) if source_result is None
+                             else copy.deepcopy(source_result.get('character_context', [])))
         with store.lock:
             require_video(store.data, video_id)
             store.data['executions'][job_id] = {
@@ -172,6 +176,7 @@ def enqueue_job(store, background, video_id, min_gap=2, language=None, source_re
                 'status': 'RUNNING', 'start_date': started, 'stop_date': None,
                 'error': None, 'cause': None, 'language': language, 'voice': voice,
                 'dialogue_language': dialogue_language,
+                'character_context': character_context,
                 'kind': 'generate' if source_result is None else 'render',
                 'narration_mode': narration_mode,
                 'source_execution_id': source_execution_id, 'min_silence_duration': min_gap,
@@ -318,7 +323,7 @@ def create_app(settings=None):
 
     @app.get('/api/trigger/executions/{job_id}/status')
     def status(job_id: str):
-        return {k: v for k, v in get_job(job_id).items() if k != 'result'}
+        return {k: v for k, v in get_job(job_id).items() if k not in ('result', 'character_context')}
 
     @app.get('/api/videos')
     def videos():
@@ -383,9 +388,13 @@ def create_app(settings=None):
     from .projects import register_project_routes
     from .editing import register_edit_routes
     from .calibration import register_calibration_routes
+    from .evidence import register_evidence_routes
+    from .characters import register_character_routes
     from .collections import register_collection_routes
     register_collection_routes(app, store, settings)
     register_project_routes(app, store, settings)
     register_edit_routes(app, store, settings, enqueue_job)
     register_calibration_routes(app, store, settings)
+    register_evidence_routes(app, store, settings)
+    register_character_routes(app, store, settings)
     return app

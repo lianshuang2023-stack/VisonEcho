@@ -109,6 +109,7 @@ class RevisionTests(unittest.TestCase):
         self.assertTrue(result["segments"][0]["pass"])
         self.assertNotIn("skip_reason", result["segments"][0])
         self.assertEqual(result["usage"]["openai_requests"], 0)
+
         self.assertEqual(result["usage"]["transcription_audio_seconds"], 0)
         self.assertEqual(result["usage"]["tts_requests"], 1)
         self.assertEqual(result["language"], "en-US")
@@ -117,6 +118,17 @@ class RevisionTests(unittest.TestCase):
         self.assertEqual({step[0] for step in self.steps},
                          {"ValidateInput", "SynthesizeAudio", "MixAudioTracks", "RecordSummary"})
         self.assertAlmostEqual(probe_media(Path(result["output_path"]), self.settings)["duration"], 3, places=1)
+
+    def test_changed_text_clears_identity_claims_but_keeps_review_frames(self):
+        self.source["segments"][0].update(character_ids=["person-a"], frame_timestamps=[1.0],
+                                          evidence_description="A blue panel.")
+        same = self.render("same-words", [])
+        self.assertEqual(same["segments"][0]["character_ids"], ["person-a"])
+        changed = self.render("changed-words", [{"segment_index": 0, "dvi_text": "Changed view."}])
+        self.assertEqual(changed["segments"][0]["character_ids"], [])
+        self.assertEqual(changed["segments"][0]["frame_timestamps"], [1.0])
+        self.assertEqual(changed["segments"][0]["evidence_description"], "A blue panel.")
+        self.assertEqual(self.source["segments"][0]["character_ids"], ["person-a"])
 
     def test_blank_text_removes_old_audio_and_stale_metadata(self):
         original = deepcopy(self.source)

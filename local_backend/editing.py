@@ -41,7 +41,7 @@ def register_edit_routes(app, store, settings, enqueue):
                 transcript_language = None
         result = job['result']
         fields = ('segment_index', 'start_time', 'end_time', 'silence_duration',
-                  'dvi_text', 'audio_duration', 'pass', 'skip_reason', 'source_start', 'source_end', 'insertion_time')
+                  'dvi_text', 'audio_duration', 'pass', 'skip_reason', 'source_start', 'source_end', 'insertion_time', 'character_ids')
         return {
             'segments': [{key: segment[key] for key in fields if key in segment}
                          for segment in result.get('segments', [])],

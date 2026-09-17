@@ -10,6 +10,8 @@
 | `src/components/LocalVideoWorkspace.tsx` | 我的作品、搜索筛选、项目管理、上传与回收站 |
 | `src/components/workspace/ProjectStudio.tsx` | 生成设置、历史版本、播放器、口述稿和字幕编辑 |
 | `src/components/workspace/ComparisonPreview.tsx` | 原声与口述版对比预览 |
+| `src/components/workspace/EvidencePanel.tsx` | 关键帧、原片跳转与版本纠错记录 |
+| `src/components/workspace/CharacterPanel.tsx` | 人物卡、称呼确认与稿件替换预览 |
 | `src/components/workspace/timeline.ts` | 原片与扩展口述的时间映射 |
 | `src/localWorkspaceApi.ts` | 作品、校准、配音与导出的类型和请求 |
 | `src/api.ts` | 上传、媒体地址、执行状态和后端配置请求 |

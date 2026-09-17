@@ -78,6 +78,41 @@ def test_description_uses_high_detail_and_no_future_dialogue(tmp_path):
     assert len(context['nearby_dialogue_context_only']) == 1
     assert content[1]['image_url']['detail'] == 'high'
     assert segment['visual_evidence'][0]['frame_timestamps'] == [5]
+    assert segment['evidence_description'] == text
+
+
+def test_confirmed_character_names_are_passed_as_references_and_matches_saved(tmp_path):
+    frame = tmp_path / 'image.jpg'; frame.write_bytes(b'synthetic-image')
+    config = settings()
+    config.character_context = [{'id': 'person-a', 'preferred_name': 'Alex',
+                                 'appearance': 'Blue jacket, short hair', 'aliases': ['blue-jacket person']}]
+    captured = []
+    def handle(request):
+        captured.append(json.loads(request.content))
+        response = completion('Alex holds a square.')
+        payload = json.loads(response['choices'][0]['message']['content'])
+        payload['character_ids'] = ['person-a']
+        response['choices'][0]['message']['content'] = json.dumps(payload)
+        return httpx.Response(200, json=response)
+    segment = {'start_time': 0, 'end_time': 5, 'silence_duration': 5}
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        _generate_description(segment, [{'path': frame, 'timestamp': 1}], {'phrases': []}, [], config, client)
+    prompt = json.loads(captured[0]['messages'][1]['content'][0]['text'])
+    assert prompt['confirmed_character_cards'] == config.character_context
+    assert segment['character_ids'] == ['person-a']
+    assert 'Similar clothing alone does not prove identity' in captured[0]['messages'][0]['content']
+
+
+def test_model_cannot_invent_character_card_ids(tmp_path):
+    frame = tmp_path / 'image.jpg'; frame.write_bytes(b'synthetic-image')
+    response = completion()
+    payload = json.loads(response['choices'][0]['message']['content'])
+    payload['character_ids'] = ['unknown']
+    response['choices'][0]['message']['content'] = json.dumps(payload)
+    with httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=response))) as client:
+        with pytest.raises(PipelineError):
+            _generate_description({'start_time': 0, 'end_time': 5, 'silence_duration': 5},
+                                  [{'path': frame, 'timestamp': 1}], {'phrases': []}, [], settings(), client)
 
 
 def test_overlong_description_gets_one_bounded_rewrite_and_counts_usage(tmp_path):

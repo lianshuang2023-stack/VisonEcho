@@ -1,11 +1,12 @@
 import { requestJson } from './api';
 import type {
-  DialogueLanguage, ExecutionStarted, NarrationEditor, NarrationMode, NarrationSegment,
+  CharacterLibrary, EvidenceFeedback, SegmentEvidence, DialogueLanguage, ExecutionStarted, NarrationEditor, NarrationMode, NarrationSegment,
   ProjectCollection, ProjectDetail, ProjectTrash, Transcript, TranscriptCalibration,
   VideoLanguage, VideoProject,
 } from './types';
 
 export type {
+  CharacterLibrary, CharacterFrameSelection, CharacterOccurrence, CharacterThumbnail, VideoCharacter, EvidenceFeedback, EvidenceFrame, EvidenceIssue, SegmentEvidence,
   DialogueLanguage, NarrationEditor, NarrationMode, NarrationSegment, ProjectCollection,
   ProjectDetail, ProjectExecution, ProjectStatus, ProjectTrash, TimelineInsertion,
   Transcript, TranscriptCalibration, TranscriptCue, VideoLanguage, VideoProject, WorkflowStatus,
@@ -123,4 +124,29 @@ export function exportUrl(jobId: string, kind: 'dialogue' | 'description', forma
 
 export function outputUrl(jobId: string): string {
   return `/api/media/output/${pathId(jobId)}`;
+}
+
+export function getSegmentEvidence(jobId: string, segmentIndex: number): Promise<SegmentEvidence> {
+  return requestJson(`${versionPath(jobId)}/segments/${segmentIndex}/evidence`);
+}
+
+export function saveEvidenceFeedback(jobId: string, segmentIndex: number, feedback: EvidenceFeedback): Promise<EvidenceFeedback> {
+  return requestJson(`${versionPath(jobId)}/segments/${segmentIndex}/feedback`, {
+    method: 'PUT', body: JSON.stringify(feedback),
+  });
+}
+
+export function getCharacters(projectId: string): Promise<CharacterLibrary> {
+  return requestJson(`${projectPath(projectId)}/characters`);
+}
+
+export function saveCharacters(projectId: string, library: CharacterLibrary): Promise<CharacterLibrary> {
+  return requestJson(`${projectPath(projectId)}/characters`, {
+    method: 'PUT',
+    body: JSON.stringify({ revision: library.revision, characters: library.characters.map(character => ({
+      ...character, thumbnail: character.thumbnail ? {
+        job_id: character.thumbnail.job_id, segment_index: character.thumbnail.segment_index, frame_id: character.thumbnail.frame_id,
+      } : null,
+    })) }),
+  });
 }

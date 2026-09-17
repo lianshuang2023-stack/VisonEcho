@@ -43,6 +43,8 @@ class Settings:
     # Source recognition is independent of the generated narration language.
     dialogue_language: str = "auto"
     narration_mode: str = "auto"
+    # Per-job snapshot of user-confirmed names; not loaded from environment.
+    character_context: list[dict] = field(default_factory=list, repr=False)
     max_video_seconds: float = 600
     max_upload_bytes: int = 500 * 1024 * 1024
     ffmpeg_bin: str = "ffmpeg"

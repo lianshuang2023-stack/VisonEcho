@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { calibrateTranscript, createCollection, deleteCollection, deleteVideo, exportUrl, generateNarration, getTranscriptCalibration, listHistoryVideos, listProjects, outputUrl, patchProject, renderNarration, restoreCollection, restoreVideo, saveTranscript } from '../localWorkspaceApi';
+import { calibrateTranscript, createCollection, deleteCollection, deleteVideo, exportUrl, generateNarration, getCharacters, getSegmentEvidence, getTranscriptCalibration, listHistoryVideos, listProjects, outputUrl, patchProject, renderNarration, restoreCollection, restoreVideo, saveCharacters, saveEvidenceFeedback, saveTranscript } from '../localWorkspaceApi';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -10,6 +10,25 @@ function mockRequest() {
 }
 
 describe('VisionEcho video API requests', () => {
+  it('loads evidence and updates a known feedback revision on the segment route', async () => {
+    const fetchMock = mockRequest();
+    await getSegmentEvidence('job/1', 2);
+    await saveEvidenceFeedback('job/1', 2, { revision: 3, issues: ['wrong_person'], note: 'Check the red coat.' });
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/videos/job%2F1/segments/2/evidence');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/videos/job%2F1/segments/2/feedback');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ revision: 3, issues: ['wrong_person'], note: 'Check the red coat.' });
+  });
+
+  it('saves character thumbnail references without trusting client URLs or timestamps', async () => {
+    const fetchMock = mockRequest();
+    await getCharacters('video/1');
+    await saveCharacters('video/1', { revision: 2, characters: [{ id: '', appearance: 'Red coat', preferred_name: '', status: 'unconfirmed', aliases: [], occurrences: [{ job_id: 'job-1', segment_index: 0 }], thumbnail: { job_id: 'job-1', segment_index: 0, frame_id: 'f0', timestamp: 999, url: 'https://example.com/untrusted.jpg' } }] });
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/projects/video%2F1/characters');
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(body.revision).toBe(2);
+    expect(body.characters[0].thumbnail).toEqual({ job_id: 'job-1', segment_index: 0, frame_id: 'f0' });
+  });
+
   it('loads all untrashed active and archived history across projects without duplicate videos', async () => {
     const fetchMock = mockRequest();
     fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ projects: [{ video_id: 'a' }, { video_id: 'b' }] }) });

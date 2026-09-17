@@ -135,6 +135,7 @@ export interface TranscriptCalibration {
 }
 
 export interface NarrationSegment {
+  character_ids?: string[];
   segment_index: number;
   start_time: number;
   end_time: number;
@@ -170,3 +171,29 @@ export interface NarrationEditor {
   };
   insertions?: TimelineInsertion[];
 }
+
+export type EvidenceIssue = 'wrong_person' | 'wrong_action' | 'missing_content';
+export interface EvidenceFrame { id: string; timestamp: number; url: string }
+export interface EvidenceFeedback { revision: number; issues: EvidenceIssue[]; note: string }
+export interface SegmentEvidence {
+  segment_index: number;
+  source_start: number;
+  source_end: number;
+  provenance: 'model' | 'review';
+  frames: EvidenceFrame[];
+  observations: { fact: string; frame_ids: string[] }[];
+  feedback: EvidenceFeedback;
+}
+export interface CharacterOccurrence { job_id: string; segment_index: number }
+export interface CharacterThumbnail extends CharacterOccurrence { frame_id: string; timestamp: number; url: string }
+export interface VideoCharacter {
+  id: string;
+  appearance: string;
+  preferred_name: string;
+  status: 'unconfirmed' | 'confirmed';
+  aliases: string[];
+  thumbnail: CharacterThumbnail | null;
+  occurrences: CharacterOccurrence[];
+}
+export interface CharacterLibrary { revision: number; characters: VideoCharacter[] }
+export type CharacterFrameSelection = CharacterThumbnail;

@@ -66,6 +66,10 @@ def render_revision(input_path: Path, output_dir: Path, settings: Any,
         if not isinstance(text, str):
             raise PipelineError("Revised descriptions must be text.")
         text = " ".join(text.split())
+        if text != " ".join(str(segment.get("dvi_text", "")).split()):
+            # A rewritten sentence has not been visually matched to the old
+            # cards. Keep frame references for review, not asserted identities.
+            segment["character_ids"] = []
         segment.update(dvi_text=text, start_time=start, end_time=end, silence_duration=end - start,
                        audio_duration=0.0, word_count=_word_count(text), char_count=len(text), wpm=0.0)
         segment["pass"] = False
