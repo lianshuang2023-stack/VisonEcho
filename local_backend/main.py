@@ -281,7 +281,7 @@ def create_app(settings=None):
         with store.lock:
             require_collection(store.data, payload.collection_id)
             if settings.workspace_upload_limit is not None and len(store.data['inputs']) + len(store.pending) + len(store.active_uploads) >= settings.workspace_upload_limit:
-                raise HTTPException(403, 'Guest trial supports two uploads. Register to keep creating.')
+                raise HTTPException(403, f'Guest trial supports {settings.workspace_upload_limit} uploads. Register to keep creating.')
             if len(store.pending) >= 100:
                 raise HTTPException(429, 'Too many pending uploads. Restart the local server.')
             store.pending[token] = {'id': video_id, 'filename': name, 'collection_id': payload.collection_id}

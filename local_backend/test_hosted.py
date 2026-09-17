@@ -150,26 +150,29 @@ def test_trial_limits_cannot_be_bypassed_by_alternate_paid_routes(server):
     app, client, _ = server
     post(client, '/api/access/guest')
     limits = client.get('/api/access/session').json()['limits']
-    assert limits == {'max_video_seconds': 60, 'max_upload_mb': 50, 'guest_generations_remaining': 1}
+    assert limits == {'max_video_seconds': 60, 'max_upload_mb': 1024, 'guest_generations_remaining': 5}
     store = seed(app, client)
     # Invalid attempts are refunded without allowing a paid job to run.
     assert post(client, '/api/trigger/executions', {'video_id': 'missing'}).status_code == 404
-    assert client.get('/api/access/session').json()['limits']['guest_generations_remaining'] == 1
-    assert post(client, '/api/trigger/executions', {'video_id': 'private-video', 'detect_characters': False}).status_code == 200
+    assert client.get('/api/access/session').json()['limits']['guest_generations_remaining'] == 5
+    for remaining in range(4, -1, -1):
+        assert post(client, '/api/trigger/executions', {'video_id': 'private-video', 'detect_characters': False}).status_code == 200
+        assert client.get('/api/access/session').json()['limits']['guest_generations_remaining'] == remaining
     assert client.get('/api/access/session').json()['limits']['guest_generations_remaining'] == 0
     for route in ['/api/trigger/executions', '/api/videos/version/render',
                   '/api/videos/version/transcript/calibrate', '/api/videos/version/characters/detect']:
         assert post(client, route).status_code == 403
     assert client.get('/api/media/input/private-video').status_code == 200
-    assert store.data['guest_paid_operations'] == 1
+    assert store.data['guest_paid_operations'] == 5
 
 
 def test_guest_upload_reservations_and_tokens_are_workspace_scoped(server):
     app, client, _ = server
     post(client, '/api/access/guest')
     url = post(client, '/api/trigger/upload', {'filename': 'first.mp4'}).json()['url']
-    assert post(client, '/api/trigger/upload', {'filename': 'second.mp4'}).status_code == 200
-    assert post(client, '/api/trigger/upload', {'filename': 'third.mp4'}).status_code == 403
+    for index in range(2, 6):
+        assert post(client, '/api/trigger/upload', {'filename': f'video-{index}.mp4'}).status_code == 200
+    assert post(client, '/api/trigger/upload', {'filename': 'sixth.mp4'}).status_code == 403
     with closing(TestClient(app, base_url=ORIGIN)) as other:
         post(other, '/api/access/guest')
         assert other.put(url, content=b'not theirs', headers={'Origin': ORIGIN}).status_code == 404
@@ -181,10 +184,25 @@ def test_redirect_does_not_consume_guest_budget_without_a_job(server):
     store = seed(app, client)
     response = post(client, '/api/trigger/executions/', {'video_id': 'private-video'}, follow_redirects=False)
     assert response.status_code == 307
-    assert client.get('/api/access/session').json()['limits']['guest_generations_remaining'] == 1
+    assert client.get('/api/access/session').json()['limits']['guest_generations_remaining'] == 5
     assert len(store.data['executions']) == 1
     assert post(client, '/api/trigger/executions/', {'video_id': 'private-video'}, follow_redirects=True).status_code == 200
-    assert client.get('/api/access/session').json()['limits']['guest_generations_remaining'] == 0
+    assert client.get('/api/access/session').json()['limits']['guest_generations_remaining'] == 4
+
+
+def test_existing_guest_gets_new_limit_without_resetting_used_operations(server):
+    app, client, config = server
+    assert client.get('/api/access/session').json()['limits']['max_upload_mb'] == 1024
+    post(client, '/api/access/guest')
+    store = app.state.workspaces.application(principal(app, client)).state.store
+    store.data['guest_paid_operations'] = 1
+    store.save()
+    assert config.max_upload_bytes == 500 * 1024 * 1024
+    assert store.settings.max_upload_bytes == 1024 ** 3
+    assert client.get('/api/health').json()['max_upload_mb'] == 1024
+    assert client.get('/api/access/session').json()['limits']['guest_generations_remaining'] == 4
+    post(client, '/api/access/guest')
+    assert store.data['guest_paid_operations'] == 1
 
 
 def test_expired_sessions_fail_closed_for_direct_media_links(server):

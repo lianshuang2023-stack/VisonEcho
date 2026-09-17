@@ -6,7 +6,7 @@ import AccessControls from './AccessControls';
 import { useAccessSession } from '../accessSession';
 import type { AccessSession } from '../accessSession';
 
-const limits = { max_video_seconds: 60, max_upload_mb: 50, guest_generations_remaining: 1 };
+const limits = { max_video_seconds: 60, max_upload_mb: 1024, guest_generations_remaining: 5 };
 const anonymous: AccessSession = { mode: 'hosted', user: null, limits };
 const guest: AccessSession = { ...anonymous, user: { id: 'guest-1', kind: 'guest', username: null, expires_at: '2026-09-20T00:00:00Z' } };
 const account: AccessSession = { ...anonymous, user: { id: 'account-1', kind: 'account', username: 'alice', expires_at: '2026-09-20T00:00:00Z' } };
@@ -33,6 +33,7 @@ describe('hosted workspace access', () => {
     await act(async () => resolve(response(anonymous)));
     expect(await screen.findByRole('heading', { name: '口述电影工作台' })).toBeVisible();
     expect(screen.getByRole('button', { name: '先试用一下' })).toBeVisible();
+    expect(screen.getByText('访客试用 · 视频最长 60 秒 · 1 GB · 5 次 AI 处理')).toBeVisible();
     expect(mounts).not.toHaveBeenCalled();
     expect(request.mock.calls.map(([url]) => url)).toEqual(['/api/access/session']);
   });

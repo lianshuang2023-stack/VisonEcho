@@ -25,7 +25,9 @@ from .access import AccessError, AccessStore
 
 COOKIE = 'visionecho_session'
 GUEST_SECONDS = 60
-GUEST_BYTES = 50 * 1024 * 1024
+GUEST_BYTES = 1024 * 1024 * 1024
+GUEST_OPERATIONS = 5
+GUEST_UPLOADS = 5
 PAID_ROUTE = re.compile(r'^/api/(?:trigger/executions|videos/[^/]+/(?:render|transcript/calibrate|characters/detect))/?$')
 
 
@@ -71,22 +73,22 @@ class Workspaces:
             config = app.state.store.settings
             guest = principal['kind'] == 'guest'
             config.max_video_seconds = min(GUEST_SECONDS, self.settings.max_video_seconds) if guest else self.settings.max_video_seconds
-            config.max_upload_bytes = min(GUEST_BYTES, self.settings.max_upload_bytes) if guest else self.settings.max_upload_bytes
-            config.workspace_upload_limit = 2 if guest else None
+            config.max_upload_bytes = GUEST_BYTES if guest else self.settings.max_upload_bytes
+            config.workspace_upload_limit = GUEST_UPLOADS if guest else None
             return app
 
     def session(self, principal):
         if principal is None:
             return {'mode': 'hosted', 'user': None, 'limits': {
                 'max_video_seconds': GUEST_SECONDS, 'max_upload_mb': GUEST_BYTES // 1024**2,
-                'guest_generations_remaining': 1}}
+                'guest_generations_remaining': GUEST_OPERATIONS}}
         app = self.application(principal)
         store = app.state.store
         with store.lock:
             limits = {'max_video_seconds': store.settings.max_video_seconds,
                       'max_upload_mb': store.settings.max_upload_bytes // 1024**2}
             if principal['kind'] == 'guest':
-                limits['guest_generations_remaining'] = max(0, 1 - store.data.get('guest_paid_operations', 0))
+                limits['guest_generations_remaining'] = max(0, GUEST_OPERATIONS - store.data.get('guest_paid_operations', 0))
         return {'mode': 'hosted', 'user': {'id': principal['workspace_id'],
                 **{key: principal[key] for key in ('kind', 'username', 'expires_at')}}, 'limits': limits}
 
@@ -114,7 +116,7 @@ class WorkspaceGateway:
             if request.method == 'POST' and PAID_ROUTE.fullmatch(request.url.path):
                 with store.lock:
                     spent = store.data.get('guest_paid_operations', 0)
-                    if spent >= 1:
+                    if spent >= GUEST_OPERATIONS:
                         return await JSONResponse({'error': 'Guest trial used. Register to keep your work and continue.'}, 403)(scope, receive, send)
                     store.data['guest_paid_operations'] = spent + 1
                     try:

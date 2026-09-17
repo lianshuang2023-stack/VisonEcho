@@ -14,7 +14,7 @@ import '../workspace.css';
 import '../ui-theme.css';
 import { useUiPreferences } from '../uiPreferences';
 import type { Translate } from '../uiPreferences';
-import { useAccessSession } from '../accessSession';
+import { uploadLimitLabel, useAccessSession } from '../accessSession';
 import AccessControls from './AccessControls';
 
 type NameDialog = { kind: 'create' } | { kind: 'collection'; item: ProjectCollection } | { kind: 'video'; item: VideoProject };
@@ -297,7 +297,7 @@ export default function LocalVideoWorkspace() {
         { label: t("回收站", "Trash"), icon: <Trash2 size={15} />, onSelect: () => goWorks('trash'), disabled: Boolean(selectedId) },
       ]}>{t("工作区", "Workspace")}<ChevronDown size={15} /></ActionMenu><AccessControls disabled={Boolean(selectedId || showUpload || showProjects || showSettings || nameDialog || moveTarget || deleteTarget || comparisonVideo || restoring)} /></div>
     </header>
-    {access.user?.kind === 'guest' && <div className="ve-guest-notice"><span>{t("访客试用", "Guest trial")} · {access.limits.max_video_seconds}{t(" 秒", " seconds")} · {access.limits.max_upload_mb} MB</span><span>{t("AI 处理剩余 ", "AI operations remaining: ")}{access.limits.guest_generations_remaining ?? 1}{t(" 次；注册可保存试用作品。", ". Register to keep trial videos.")}</span></div>}
+    {access.user?.kind === 'guest' && <div className="ve-guest-notice"><span>{t("访客试用", "Guest trial")} · {access.limits.max_video_seconds}{t(" 秒", " seconds")} · {uploadLimitLabel(access.limits.max_upload_mb)}</span><span>{t("AI 处理剩余 ", "AI operations remaining: ")}{access.limits.guest_generations_remaining ?? '—'}{t(" 次；注册可保存试用作品。", ". Register to keep trial videos.")}</span></div>}
     {selectedId ? <ProjectStudio key={selectedId} initialIntent={initialIntent} backLabel={t("返回作品", "Back to videos")} projectId={selectedId} processingReady={ready} speechReady={Boolean(health?.speech_region_configured && !healthError)} speechLanguages={health?.languages} onBack={() => { setSelectedId(null); setNotice(''); void load(true); }} onSetup={() => setShowSettings(true)} /> : <main className="ws-works-main" id="visionecho-content">
       {isTrash && <button className="ws-back" onClick={() => goWorks()}><ArrowLeft size={15} />{t("返回作品", "Back to videos")}</button>}
       <div className="ws-works-heading"><h1>{isTrash ? t("回收站", "Trash") : t("我的作品", "My videos")}{isTrash && <span>{trash.collections.length + trash.videos.length}</span>}</h1>{!isTrash && !firstUseEmpty && <button className="ws-button primary" onClick={openUpload}><Upload size={17} />{t("上传视频", "Upload video")}</button>}</div>

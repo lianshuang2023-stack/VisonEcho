@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Clapperboard, Languages, LoaderCircle, Moon, Sun } from 'lucide-react';
-import { accessRequest, AccessSessionContext } from '../accessSession';
+import { accessRequest, AccessSessionContext, uploadLimitLabel } from '../accessSession';
 import type { AccessSession } from '../accessSession';
 import { useUiPreferences } from '../uiPreferences';
 import { Alert, Loading, Modal } from './workspace/WorkspaceShared';
@@ -83,7 +83,7 @@ export default function AccessGate({ children }: { children: ReactNode }) {
       {loadError ? <><Alert>{loadError}</Alert><button className="ws-button secondary" disabled={busy} onClick={() => { setLoading(true); void refresh(); }}>{t('重新检查连接', 'Check connection again')}</button></> : <>
         <div className="ve-access-tabs"><button type="button" aria-pressed={formMode === 'login'} disabled={busy} onClick={() => { setFormMode('login'); setError(''); }}>{t('登录', 'Log in')}</button><button type="button" aria-pressed={formMode === 'register'} disabled={busy} onClick={() => { setFormMode('register'); setError(''); }}>{t('注册', 'Register')}</button></div>
         <AccessForm key={formMode} mode={formMode} guest={false} busy={busy} error={error} onMode={mode => { setFormMode(mode); setError(''); }} onSubmit={(username, password) => void authenticate(formMode === 'register' ? '/register' : '/login', { username, password })} />
-        <div className="ve-access-trial"><button type="button" className="ws-button secondary" disabled={busy} onClick={() => void authenticate('/guest')}>{t('先试用一下', 'Try as a guest')}</button><p>{t('访客试用 · 视频最长 60 秒 · 50 MB · 1 次 AI 处理', 'Guest trial · Up to 60 seconds · 50 MB · 1 AI operation')}</p></div>
+        <div className="ve-access-trial"><button type="button" className="ws-button secondary" disabled={busy} onClick={() => void authenticate('/guest')}>{t('先试用一下', 'Try as a guest')}</button>{session && <p>{t('访客试用 · 视频最长 ', 'Guest trial · Up to ')}{session.limits.max_video_seconds}{t(' 秒 · ', ' seconds · ')}{uploadLimitLabel(session.limits.max_upload_mb)} · {session.limits.guest_generations_remaining ?? '—'}{t(' 次 AI 处理', ' AI operations')}</p>}</div>
       </>}
     </main>
   </div>;

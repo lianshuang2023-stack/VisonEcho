@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import LocalVideoWorkspace from '../LocalVideoWorkspace';
 import ProjectStudio from '../workspace/ProjectStudio';
+import { AccessSessionContext } from '../../accessSession';
 import type { ProjectCollection, ProjectDetail, VideoProject } from '../../localWorkspaceApi';
 
 const mocks = vi.hoisted(() => ({ fetchBackendHealth: vi.fn(), fetchInputVideoUrl: vi.fn(), fetchExecutionStatus: vi.fn(), uploadVideo: vi.fn(), listProjects: vi.fn(), listHistoryVideos: vi.fn(), listCollections: vi.fn(), createCollection: vi.fn(), renameCollection: vi.fn(), deleteCollection: vi.fn(), deleteVideo: vi.fn(), listTrash: vi.fn(), restoreCollection: vi.fn(), restoreVideo: vi.fn(), patchProject: vi.fn(), getProject: vi.fn(), getNarration: vi.fn(), getTranscript: vi.fn(), saveTranscript: vi.fn(), generateNarration: vi.fn(), renderNarration: vi.fn(), calibrateTranscript: vi.fn(), getTranscriptCalibration: vi.fn(), setVideoReview: vi.fn() }));
@@ -28,6 +29,15 @@ afterEach(() => { cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); vi.useRea
 const studio = () => render(<ProjectStudio projectId="video-1" processingReady onBack={vi.fn()} onSetup={vi.fn()} />);
 
 describe('local video workspace', () => {
+  it('displays the server-provided guest file limit and remaining AI operations', async () => {
+    const session = { mode: 'hosted' as const, user: { id: 'trial-1', kind: 'guest' as const, username: null, expires_at: '2026-09-20T00:00:00Z' }, limits: { max_video_seconds: 60, max_upload_mb: 1024, guest_generations_remaining: 5 } };
+    const view = render(<AccessSessionContext.Provider value={{ session, busy: false, openAccess: vi.fn(), refresh: async () => {} }}><LocalVideoWorkspace /></AccessSessionContext.Provider>);
+    await screen.findByRole('heading', { name: '我的作品' });
+    expect(screen.getByText('访客试用 · 60 秒 · 1 GB')).toBeVisible();
+    expect(screen.getByText('AI 处理剩余 5 次；注册可保存试用作品。')).toBeVisible();
+    view.rerender(<AccessSessionContext.Provider value={{ session: { ...session, limits: { ...session.limits, guest_generations_remaining: 0 } }, busy: false, openAccess: vi.fn(), refresh: async () => {} }}><LocalVideoWorkspace /></AccessSessionContext.Provider>);
+    expect(screen.getByText('AI 处理剩余 0 次；注册可保存试用作品。')).toBeVisible();
+  });
   it('shows one works list with one upload and search entry, and hides configured services', async () => {
     const other = { ...collection, id: 'trip', title: '旅行项目' };
     const archivedVideo = { ...project, video_id: 'archived-video', collection_id: 'trip', title: '山间行走', archived: true };

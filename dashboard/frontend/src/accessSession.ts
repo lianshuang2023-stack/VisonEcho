@@ -25,6 +25,10 @@ export const AccessSessionContext = createContext<AccessContextValue>({
 });
 export const useAccessSession = () => useContext(AccessSessionContext);
 
+export function uploadLimitLabel(megabytes: number): string {
+  return megabytes >= 1024 ? String(Number((megabytes / 1024).toFixed(2))) + ' GB' : String(megabytes) + ' MB';
+}
+
 export async function accessRequest(path = '/session', payload?: Record<string, string>): Promise<AccessSession> {
   const response = await fetch('/api/access' + path, {
     method: payload ? 'POST' : 'GET',
