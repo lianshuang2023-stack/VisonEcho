@@ -5,12 +5,15 @@ permissions:
   contents: read
 jobs:
   linux-container:
+    # A transferred server image stays in this private repository's Actions
+    # artifact storage. Never publish this workflow's bundle from a public fork.
+    if: ${{ github.event.repository.private == true }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Build Linux image without credentials or private data
-        run: docker build --platform linux/amd64 -t visionecho:test .
+        run: docker build --platform linux/amd64 -t visionecho:test -t visionecho:local .
       - name: Verify FFmpeg and hosted session isolation
         run: |
           docker run --rm visionecho:test ffmpeg -version
@@ -53,3 +56,40 @@ jobs:
               assert b'VisionEcho' in response.read()
           print('Linux container and isolated guest sessions passed')
           PY
+      - name: Validate Compose and Caddy with placeholder configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'rm -f deploy/server.env deploy/Caddyfile' EXIT
+          cp deploy/server.env.example deploy/server.env
+          chmod 600 deploy/server.env
+          sed -i 's/^DOMAIN=.*/DOMAIN=deployment-check.example.invalid/' deploy/server.env
+          cp deploy/Caddyfile.example deploy/Caddyfile
+          docker compose --env-file deploy/server.env -f deploy/compose.yml config --quiet
+          docker pull --platform linux/amd64 caddy:2-alpine
+          docker run --rm --network none --entrypoint caddy -e DOMAIN=deployment-check.example.invalid -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Prepare private server transfer bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p server-bundle/deploy
+          docker image inspect visionecho:local caddy:2-alpine --format '{{.RepoTags}} {{.Os}}/{{.Architecture}} {{.Id}}' > server-bundle/images.txt
+          test "$(docker image inspect visionecho:local --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
+          test "$(docker image inspect caddy:2-alpine --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
+          docker save visionecho:local caddy:2-alpine | gzip -1 > server-bundle/images.tar.gz
+          cp deploy/compose.yml deploy/Caddyfile.example deploy/server.env.example deploy/README.zh-CN.md server-bundle/deploy/
+          cp LICENSE NOTICE server-bundle/
+          printf '%s\n' "Source commit: $GITHUB_SHA" "Actions run: $GITHUB_RUN_ID" "Run attempt: $GITHUB_RUN_ATTEMPT" > server-bundle/build-info.txt
+          printf '%s\n' 'Load images with: docker load < images.tar.gz' 'Configure deploy/server.env on the server; no real credentials or runtime data are included.' 'Start after configuration: docker compose --env-file deploy/server.env -f deploy/compose.yml up -d --no-build --pull never' > server-bundle/LOAD.txt
+          (cd server-bundle && sha256sum images.tar.gz images.txt build-info.txt LOAD.txt LICENSE NOTICE deploy/compose.yml deploy/Caddyfile.example deploy/server.env.example deploy/README.zh-CN.md > SHA256SUMS)
+          test ! -e server-bundle/deploy/server.env
+          test ! -e server-bundle/.local-data
+          test ! -e server-bundle/.hosted-data
+      - name: Store private deployment artifact for three days
+        uses: actions/upload-artifact@v4
+        with:
+          name: visionecho-linux-amd64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: server-bundle/
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0

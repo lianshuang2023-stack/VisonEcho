@@ -1,0 +1,76 @@
+name: visionecho
+
+services:
+  app:
+    image: ${VISIONECHO_IMAGE:-visionecho:local}
+    platform: linux/amd64
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    user: "10001:10001"
+    env_file:
+      - ./server.env
+    environment:
+      ACCESS_MODE: hosted
+      PUBLIC_ORIGIN: https://${DOMAIN:?Set DOMAIN in deploy/server.env}
+      HOSTED_DATA_DIR: /data
+      LOCAL_DATA_DIR: /app/.local-data
+      MAX_UPLOAD_MB: "1024"
+      FORWARDED_ALLOW_IPS: ${CADDY_PRIVATE_IP:-172.30.88.2}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - app-data:/data
+    networks:
+      - web
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # The image healthcheck calls localhost:8000/healthz with the Host from
+    # PUBLIC_ORIGIN. The image also fixes Uvicorn to a single worker.
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in deploy/server.env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      web:
+        ipv4_address: ${CADDY_PRIVATE_IP:-172.30.88.2}
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  web:
+    ipam:
+      config:
+        - subnet: ${VISIONECHO_SUBNET:-172.30.88.0/24}
+
+volumes:
+  app-data:
+  caddy-data:
+  caddy-config:

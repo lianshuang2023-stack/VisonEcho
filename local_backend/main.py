@@ -5,10 +5,13 @@ from typing import Literal
 from pathlib import Path
 from threading import Lock
 import copy
+import asyncio
+import hashlib
 import json
 import re
 import secrets
 import subprocess
+import time
 import uuid
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
@@ -23,12 +26,16 @@ STEPS = ['ValidateInput', 'TranscribeVideo', 'SilenceDetection',
          'AnalyzeSilenceSegments', 'GenerateDVI', 'SynthesizeAudio',
          'MixAudioTracks', 'RecordSummary']
 
+UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024
+UPLOAD_TTL_SECONDS = 3600
+
 def now():
     return datetime.now(timezone.utc).isoformat()
 
 class UploadRequest(BaseModel):
     filename: str = Field(min_length=1, max_length=240)
     collection_id: str = Field(default='default', min_length=1, max_length=100)
+    size_bytes: int | None = Field(default=None, gt=0, strict=True)
 
 class ExecutionRequest(BaseModel):
     video_id: str
@@ -50,6 +57,7 @@ class Store:
         self.busy = Lock()
         self.pending = {}
         self.active_uploads = {}
+        self.completed_uploads = {}
         index = self.root / 'index.json'
         self.data = json.loads(index.read_text()) if index.exists() else {
             'inputs': {}, 'executions': {}, 'outputs': {},
@@ -279,21 +287,184 @@ def create_app(settings=None):
         video_id = f'{stem}-{uuid.uuid4().hex[:12]}'
         token = secrets.token_urlsafe(24)
         with store.lock:
+            cleanup_uploads()
             require_collection(store.data, payload.collection_id)
+            if payload.size_bytes is not None and payload.size_bytes > settings.max_upload_bytes:
+                raise HTTPException(413, f'Upload limit is {settings.max_upload_bytes // 1024 // 1024} MB.')
             if settings.workspace_upload_limit is not None and len(store.data['inputs']) + len(store.pending) + len(store.active_uploads) >= settings.workspace_upload_limit:
                 raise HTTPException(403, f'Guest trial supports {settings.workspace_upload_limit} uploads. Register to keep creating.')
-            if len(store.pending) >= 100:
+            if len(store.pending) + len(store.active_uploads) >= 100:
                 raise HTTPException(429, 'Too many pending uploads. Restart the local server.')
-            store.pending[token] = {'id': video_id, 'filename': name, 'collection_id': payload.collection_id}
-        return {'url': f'/api/uploads/{token}', 'key': f'input/{video_id}.mp4'}
+            pending = {'id': video_id, 'filename': name, 'collection_id': payload.collection_id,
+                       'expires_at': time.time() + UPLOAD_TTL_SECONDS}
+            if payload.size_bytes is not None:
+                pending.update(size_bytes=payload.size_bytes, chunks=[], receiving=False)
+            store.pending[token] = pending
+        response = {'url': f'/api/uploads/{token}', 'key': f'input/{video_id}.mp4'}
+        if payload.size_bytes is not None:
+            response.update(chunk_size=UPLOAD_CHUNK_BYTES, chunk_url=f'/api/uploads/{token}/chunks/{{index}}',
+                            complete_url=f'/api/uploads/{token}/complete')
+        return response
+
+    def chunk_path(pending):
+        directory = store.root / 'chunk-uploads'
+        if directory.is_symlink() or not directory.resolve().is_relative_to(store.root.resolve()):
+            raise HTTPException(409, 'Upload storage is unavailable.')
+        directory.mkdir(mode=0o700, exist_ok=True)
+        identifier = pending['id']
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,120}', identifier):
+            raise HTTPException(409, 'Upload reference is invalid.')
+        path = directory / (identifier + '.part')
+        if path.is_symlink():
+            raise HTTPException(409, 'Upload storage is unavailable.')
+        return path
+
+    def cleanup_uploads():
+        # Call under store.lock. Only server-generated chunk spool files are
+        # eligible for deletion; original media and user outputs are untouched.
+        current = time.time()
+        for records in (store.pending, store.active_uploads):
+            for key, pending in list(records.items()):
+                if pending.get('expires_at', current + 1) <= current and not pending.get('receiving'):
+                    if 'size_bytes' in pending:
+                        chunk_path(pending).unlink(missing_ok=True)
+                    records.pop(key, None)
+        for key, completed in list(store.completed_uploads.items()):
+            if completed['expires_at'] <= current:
+                store.completed_uploads.pop(key, None)
+        directory = store.root / 'chunk-uploads'
+        if directory.is_dir() and not directory.is_symlink():
+            active = {item['id'] for item in store.active_uploads.values()}
+            for path in directory.glob('*.part'):
+                if (not path.is_symlink() and path.is_file() and path.stem not in active
+                        and re.fullmatch(r'[A-Za-z0-9_-]{1,120}', path.stem)
+                        and path.stat().st_mtime + UPLOAD_TTL_SECONDS <= current):
+                    path.unlink(missing_ok=True)
+
+    def chunk_reservation(token):
+        cleanup_uploads()
+        pending = store.active_uploads.get(token) or store.pending.get(token)
+        if not pending or 'size_bytes' not in pending or pending.get('expires_at', 0) <= time.time():
+            raise HTTPException(404, 'Upload session expired or was not found. Start the upload again.')
+        require_collection(store.data, pending['collection_id'])
+        if pending.get('receiving'):
+            raise HTTPException(409, 'This upload is receiving another request. Retry this chunk shortly.')
+        store.pending.pop(token, None)
+        store.active_uploads[token] = pending
+        return pending
+
+    @app.put('/api/uploads/{token}/chunks/{index}')
+    async def receive_chunk(token: str, index: int, request: Request):
+        with store.lock:
+            pending = chunk_reservation(token)
+            count = (pending['size_bytes'] + UPLOAD_CHUNK_BYTES - 1) // UPLOAD_CHUNK_BYTES
+            if index < 0 or index >= count or index > len(pending['chunks']):
+                raise HTTPException(409, 'Chunks must be uploaded in order.')
+            expected = min(UPLOAD_CHUNK_BYTES, pending['size_bytes'] - index * UPLOAD_CHUNK_BYTES)
+            pending['receiving'] = True
+        try:
+            async def read_body():
+                body = bytearray()
+                async for part in request.stream():
+                    if len(body) + len(part) > expected:
+                        raise HTTPException(413, 'Upload chunk exceeds its declared size.')
+                    body.extend(part)
+                return body
+            try:
+                body = await asyncio.wait_for(read_body(), timeout=180)
+            except TimeoutError:
+                raise HTTPException(408, 'Upload chunk timed out. Retry this chunk.') from None
+            if len(body) != expected:
+                raise HTTPException(400, 'Upload chunk size does not match the declared file size.')
+            digest = hashlib.sha256(body).hexdigest()
+            with store.lock:
+                require_collection(store.data, pending['collection_id'])
+                if pending['expires_at'] <= time.time():
+                    raise HTTPException(404, 'Upload session expired. Start the upload again.')
+                if index < len(pending['chunks']):
+                    if pending['chunks'][index] != digest:
+                        raise HTTPException(409, 'A different chunk was already received at this position.')
+                    return {'index': index, 'received_bytes': min(len(pending['chunks']) * UPLOAD_CHUNK_BYTES, pending['size_bytes'])}
+                path = chunk_path(pending)
+                offset = index * UPLOAD_CHUNK_BYTES
+                if (path.stat().st_size if path.exists() else 0) != offset:
+                    raise HTTPException(409, 'Upload data is incomplete. Start the upload again.')
+                try:
+                    with path.open('ab') as target:
+                        target.write(body)
+                except OSError:
+                    if path.exists():
+                        with path.open('r+b') as target:
+                            target.truncate(offset)
+                    raise HTTPException(503, 'Cannot save this upload chunk. Check disk space and retry.') from None
+                pending['chunks'].append(digest)
+                return {'index': index, 'received_bytes': offset + len(body)}
+        finally:
+            with store.lock:
+                pending['receiving'] = False
+
+    @app.post('/api/uploads/{token}/complete')
+    async def complete_upload(token: str):
+        with store.lock:
+            cleanup_uploads()
+            completed = store.completed_uploads.get(token)
+            if completed:
+                require_video(store.data, completed['video_id'])
+                return {'key': completed['key']}
+            pending = chunk_reservation(token)
+            count = (pending['size_bytes'] + UPLOAD_CHUNK_BYTES - 1) // UPLOAD_CHUNK_BYTES
+            path = chunk_path(pending)
+            if len(pending['chunks']) != count or not path.is_file() or path.stat().st_size != pending['size_bytes']:
+                raise HTTPException(409, 'Upload is incomplete. Send all chunks before finishing.')
+            pending['receiving'] = True
+        try:
+            duration = await run_in_threadpool(validate_upload, path, settings)
+            with store.lock:
+                collection = require_collection(store.data, pending['collection_id'])
+                if pending['expires_at'] <= time.time():
+                    raise HTTPException(404, 'Upload session expired. Start the upload again.')
+                video_id = pending['id']
+                input_directory = store.root / 'input'
+                if input_directory.is_symlink() or not input_directory.resolve().is_relative_to(store.root.resolve()):
+                    raise HTTPException(409, 'The uploaded video path is unavailable.')
+                target = input_directory / (video_id + '.mp4')
+                if target.is_symlink() or target.exists() or not target.resolve().is_relative_to((store.root / 'input').resolve()):
+                    raise HTTPException(409, 'The uploaded video path is unavailable.')
+                before = copy.deepcopy(store.data)
+                path.replace(target)
+                store.data['inputs'][video_id] = {
+                    'video_id': video_id, 'key': f'input/{video_id}.mp4', 'filename': pending['filename'],
+                    'size_mb': round(pending['size_bytes'] / 1024**2, 3), 'last_modified': now(),
+                    'duration': duration, 'collection_id': pending['collection_id']}
+                collection['updated_at'] = now()
+                try:
+                    store.save()
+                except Exception:
+                    store.data.clear()
+                    store.data.update(before)
+                    target.replace(path)
+                    raise HTTPException(503, 'Cannot finish this upload. Check disk space and retry.') from None
+                key = f'input/{video_id}.mp4'
+                store.completed_uploads[token] = {'video_id': video_id, 'key': key, 'expires_at': time.time() + UPLOAD_TTL_SECONDS}
+                while len(store.completed_uploads) > 100:
+                    store.completed_uploads.pop(next(iter(store.completed_uploads)))
+                store.active_uploads.pop(token, None)
+                return {'key': key}
+        finally:
+            with store.lock:
+                pending['receiving'] = False
 
     @app.put('/api/uploads/{token}')
     async def receive_upload(token: str, request: Request):
         with store.lock:
+            cleanup_uploads()
+            if 'size_bytes' in store.pending.get(token, {}) or 'size_bytes' in store.active_uploads.get(token, {}):
+                raise HTTPException(409, 'Use the chunk upload URLs returned for this file.')
             pending = store.pending.pop(token, None)
             if not pending:
                 raise HTTPException(404, 'Upload link not found or already used.')
             require_collection(store.data, pending['collection_id'])
+            pending['receiving'] = True
             store.active_uploads[token] = pending
         video_id = pending['id']
         path = store.root / 'input' / f'{video_id}.mp4'

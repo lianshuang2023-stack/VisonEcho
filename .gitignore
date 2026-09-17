@@ -42,6 +42,8 @@ cdk-outputs.json
 *.sqlite3-wal
 *.sqlite3-shm
 .local-data/
+deploy/server.env
+deploy/Caddyfile
 .pytest_cache/
 
 # Local reports and intermediate UI copy (not application source)

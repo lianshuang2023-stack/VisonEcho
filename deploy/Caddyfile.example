@@ -1,0 +1,27 @@
+{
+    servers {
+        timeouts {
+            read_header 15s
+            read_body 150s
+            write 150s
+            idle 2m
+        }
+    }
+}
+
+# DOMAIN must be a real DNS name, without https://, a port, or a URL path.
+# Caddy obtains and renews the certificate after DNS and ports 80/443 work.
+{$DOMAIN} {
+    request_body {
+        max_size 1GB
+    }
+    encode zstd gzip
+    reverse_proxy app:8000 {
+        # Preserve the public Host for the application's exact origin checks.
+        header_up Host {host}
+        transport http {
+            dial_timeout 10s
+            response_header_timeout 150s
+        }
+    }
+}
