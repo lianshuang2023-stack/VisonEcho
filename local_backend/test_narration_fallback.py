@@ -108,3 +108,24 @@ def test_empty_speech_success_continues_to_visual_narration(continuous_video,tmp
     assert result['outcome']=='audio_description'
     assert result['summary']['passed_segments']==1
     assert Path(result['output_path']).is_file()
+
+@pytest.mark.parametrize('fails', [False, True])
+def test_optional_character_analysis_uses_current_frames_and_does_not_block_export(continuous_video,tmp_path,monkeypatch,fails):
+    from local_backend import character_detection
+    source,settings,calls=continuous_video
+    settings.detect_characters=True
+    seen=[]
+    def analyze(frames, existing, run_settings, client):
+        seen.extend(frames)
+        if fails:
+            raise pipeline.PipelineError('Temporary detector failure')
+        return {'candidates': [], 'usage': {'openai_requests':1,'total_tokens':10},
+                'coverage': {'frame_count':len(frames),'segment_count':1}}
+    monkeypatch.setattr(character_detection,'analyze_character_frames',analyze)
+    result=pipeline.process_video(source,tmp_path/'detect',settings,2,lambda *args:None)
+    assert seen and all(frame['frame_id'].startswith('f') for frame in seen)
+    assert all(frame['job_id']=='detect' for frame in seen)
+    assert result['character_detection']['status']==('FAILED' if fails else 'SUCCEEDED')
+    assert result['outcome']=='audio_description'
+    assert result['usage']['openai_requests']==(1 if fails else 2)
+    assert Path(result['output_path']).is_file()

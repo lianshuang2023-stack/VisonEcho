@@ -30,5 +30,7 @@ def video_running(data, video_id):
     jobs = data.get('executions', {})
     if any(job.get('video_id') == video_id and job.get('status') == 'RUNNING' for job in jobs.values()):
         return True
-    return any(task.get('status') == 'RUNNING' and jobs.get(task.get('job_id'), {}).get('video_id') == video_id
-               for task in data.get('calibrations', {}).values())
+    return any(task.get('status') == 'RUNNING' and
+               (task.get('video_id') == video_id or jobs.get(task.get('job_id'), {}).get('video_id') == video_id)
+               for group in ('calibrations', 'character_detections')
+               for task in data.get(group, {}).values())

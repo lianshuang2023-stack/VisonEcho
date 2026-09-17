@@ -137,7 +137,7 @@ def _project_record(data, video_id: str, settings=None):
 def _execution_record(job, settings):
     # Never serialize result paths or arbitrary provider payloads to the browser.
     fields = ('execution_arn', 'video_id', 'status', 'start_date', 'stop_date',
-              'language', 'dialogue_language', 'voice', 'source_execution_id', 'min_silence_duration', 'kind')
+              'language', 'dialogue_language', 'voice', 'source_execution_id', 'min_silence_duration', 'kind', 'detect_characters')
     result = {field: job[field] for field in fields if field in job}
     result['error'] = settings.redact(job['error']) if job.get('error') else None
     result['cause'] = settings.redact(job['cause']) if job.get('cause') else None

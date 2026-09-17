@@ -27,6 +27,11 @@
 .ve-character-heading>span { font-size:12px; color:var(--ws-muted); }
 .ve-character-heading>svg:last-child { margin-left:auto; }
 .ve-character-body { padding-bottom:18px; }
+.ve-character-detection-actions { display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap; }
+.ve-character-detection-actions small,.ve-character-detection-status small,.ve-detect-setting small { color:var(--ws-muted); font-size:11px; }
+.ve-character-detection-status { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:10px 0 14px; color:var(--ws-text); font-size:12px; line-height:1.6; }
+.ve-detect-setting { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:16px; font-size:13px; color:var(--ws-text); }
+.ve-detect-setting input { width:15px!important; height:15px; accent-color:var(--ve-accent); }
 .ve-character-list { display:grid; gap:10px; margin-bottom:14px; }
 .ve-character-card { display:flex; align-items:flex-start; gap:10px; padding:10px 0; border-top:1px solid var(--ws-line); }
 .ve-character-card>img,.ve-character-placeholder { width:70px; height:52px; border-radius:6px; background:var(--ws-bg); object-fit:contain; flex-shrink:0; }

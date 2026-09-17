@@ -1,8 +1,8 @@
-import { useEffect, useImperativeHandle, useState } from 'react';
+import { useEffect, useEffectEvent, useImperativeHandle, useRef, useState } from 'react';
 import type { Ref } from 'react';
-import { ChevronDown, Pencil, Plus, Users } from 'lucide-react';
-import { getCharacters, saveCharacters } from '../../localWorkspaceApi';
-import type { CharacterFrameSelection, CharacterLibrary, NarrationSegment, VideoCharacter } from '../../localWorkspaceApi';
+import { ChevronDown, LoaderCircle, Pencil, Plus, ScanSearch, Users } from 'lucide-react';
+import { detectCharacters, getCharacterDetection, getCharacters, getLatestCharacterDetection, saveCharacters } from '../../localWorkspaceApi';
+import type { CharacterDetection, CharacterFrameSelection, CharacterLibrary, NarrationEditor, NarrationSegment, VideoCharacter } from '../../localWorkspaceApi';
 import { useUiPreferences } from '../../uiPreferences';
 import { Alert, Loading, Modal } from './WorkspaceShared';
 import { errorMessage } from './workspaceUtils';
@@ -15,12 +15,12 @@ export interface CharacterPanelHandle { createFromFrame: (frame: CharacterFrameS
 const emptyCharacter = (): VideoCharacter => ({ id: '', appearance: '', preferred_name: '', status: 'unconfirmed', aliases: [], thumbnail: null, occurrences: [] });
 const code = (character: VideoCharacter) => 'P-' + character.id.slice(0, 8).toUpperCase();
 interface Props {
-  projectId: string; jobId: string; segments: NarrationSegment[]; disabled?: boolean;
+  projectId: string; jobId: string; segments: NarrationSegment[]; disabled?: boolean; refreshKey?: number; automaticDetection?: NarrationEditor['character_detection'];
   ref?: Ref<CharacterPanelHandle>; onDirtyChange: (dirty: boolean) => void;
   onBusyChange: (busy: boolean) => void; onApply: (replacements: NarrationReplacement[]) => void;
 }
 
-export default function CharacterPanel({ projectId, jobId, segments, disabled = false, ref, onDirtyChange, onBusyChange, onApply }: Props) {
+export default function CharacterPanel({ projectId, jobId, segments, disabled = false, refreshKey, automaticDetection, ref, onDirtyChange, onBusyChange, onApply }: Props) {
   const { t, language } = useUiPreferences();
   const [open, setOpen] = useState(false);
   const [library, setLibrary] = useState<CharacterLibrary | null>(null);
@@ -35,15 +35,72 @@ export default function CharacterPanel({ projectId, jobId, segments, disabled = 
   const [proposals, setProposals] = useState<NarrationReplacement[]>([]);
   const [selected, setSelected] = useState<number[]>([]);
   const [notice, setNotice] = useState('');
+  const [detection, setDetection] = useState<CharacterDetection | null>(null);
+  const [detectionError, setDetectionError] = useState('');
+  const [detectionConfirm, setDetectionConfirm] = useState(false);
+  const [submittingDetection, setSubmittingDetection] = useState(false);
+  const [detectionTimedOut, setDetectionTimedOut] = useState(false);
+  const [detectionPoll, setDetectionPoll] = useState(0);
+  const requestIdentity = useRef(0);
+  const detectionStartedAt = useRef(0);
+  const activeProject = useRef(projectId);
+  const localError = useEffectEvent((reason: unknown) => errorMessage(reason, language));
+  const counts = (result: { added_count?: number; updated_count?: number; skipped_count?: number }) => t('新增 ', 'Added ') + (result.added_count ?? 0) + t('，更新 ', ', updated ') + (result.updated_count ?? 0) + t('，待整理 ', ', pending ') + (result.skipped_count ?? 0) + t(' 张人物卡。', ' character cards.');
+  const detecting = detection?.status === 'RUNNING';
+  const cardBusy = saving || submittingDetection || detecting;
   const draftDirty = Boolean(draft && (JSON.stringify(draft) !== JSON.stringify(baseline) || aliases !== (baseline?.aliases.join(', ') ?? '')));
   useEffect(() => { onDirtyChange(draftDirty); }, [draftDirty, onDirtyChange]);
-  useEffect(() => { onBusyChange(saving); }, [saving, onBusyChange]);
+  useEffect(() => { onBusyChange(cardBusy); }, [cardBusy, onBusyChange]);
+  useEffect(() => { const requests = requestIdentity; activeProject.current = projectId; return () => { requests.current++; activeProject.current = ''; }; }, [projectId]);
+  const hasDraft = Boolean(draft);
+  useEffect(() => {
+    if (!open || hasDraft) return;
+    let active = true;
+    const identity = ++requestIdentity.current;
+    void Promise.allSettled([getCharacters(projectId), getLatestCharacterDetection(projectId)]).then(results => {
+      if (!active || identity !== requestIdentity.current) return;
+      if (results[0].status === 'fulfilled') setLibrary(results[0].value);
+      else setError(localError(results[0].reason));
+      if (results[1].status === 'fulfilled') {
+        const task = results[1].value;
+        setDetection(task); setDetectionError('');
+        if (task?.status === 'RUNNING') { detectionStartedAt.current = Date.now(); setDetectionTimedOut(false); }
+      } else setDetectionError(localError(results[1].reason));
+      setLoading(false);
+    });
+    return () => { active = false; };
+  }, [open, projectId, jobId, hasDraft, refreshKey]);
+  useEffect(() => {
+    if (!detection?.detection_id || detection.status !== 'RUNNING') return;
+    let active = true;
+    let timer: number;
+    const taskId = detection.detection_id;
+    const poll = async () => {
+      try {
+        const next = await getCharacterDetection(taskId);
+        if (!active) return;
+        if (next.status === 'SUCCEEDED') {
+          const updated = await getCharacters(projectId);
+          if (!active) return;
+          setLibrary(updated);
+        }
+        setDetection(next); setDetectionError('');
+        if (next.status !== 'RUNNING') return;
+      } catch (reason) { if (active) setDetectionError(localError(reason)); }
+      if (!active) return;
+      if (Date.now() - detectionStartedAt.current >= 15 * 60 * 1000) { setDetectionTimedOut(true); return; }
+      timer = window.setTimeout(() => void poll(), 2000);
+    };
+    timer = window.setTimeout(() => void poll(), 1200);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [detection?.detection_id, detection?.status, projectId, detectionPoll]);
 
   async function load(): Promise<CharacterLibrary | null> {
+    const identity = ++requestIdentity.current;
     setLoading(true); setError('');
-    try { const result = await getCharacters(projectId); setLibrary(result); return result; }
-    catch (reason) { setError(errorMessage(reason, language)); return null; }
-    finally { setLoading(false); }
+    try { const result = await getCharacters(projectId); if (identity !== requestIdentity.current) return null; setLibrary(result); return result; }
+    catch (reason) { if (identity === requestIdentity.current) setError(errorMessage(reason, language)); return null; }
+    finally { if (identity === requestIdentity.current) setLoading(false); }
   }
   function edit(character: VideoCharacter, selectedFrame: CharacterFrameSelection | null = null) {
     const next = { ...character, aliases: [...character.aliases], occurrences: [...character.occurrences] };
@@ -56,9 +113,9 @@ export default function CharacterPanel({ projectId, jobId, segments, disabled = 
   }
   function discard() { setDraft(null); setBaseline(null); setFrame(null); setDiscardOpen(false); setProposals([]); }
   async function createFromFrame(selectedFrame: CharacterFrameSelection) {
-    setOpen(true);
+    if (draft || cardBusy) return;
     const records = library ?? await load();
-    if (records) edit(emptyCharacter(), selectedFrame);
+    if (records) { edit(emptyCharacter(), selectedFrame); setOpen(true); }
   }
   useImperativeHandle(ref, () => ({ createFromFrame: selectedFrame => { void createFromFrame(selectedFrame); }, discard }));
   function close() { if (draftDirty) setDiscardOpen(true); else discard(); }
@@ -66,6 +123,18 @@ export default function CharacterPanel({ projectId, jobId, segments, disabled = 
     const matches = proposeCharacterRenames(character, character, jobId, segments);
     setProposals(matches); setSelected([]);
     if (!matches.length) setNotice(t('当前口述稿没有需要替换的已知别名。', 'No known aliases need replacement in the current script.'));
+  }
+  async function startDetection() {
+    if (!library || !jobId || disabled || cardBusy || draftDirty) return;
+    const identity = ++requestIdentity.current;
+    setSubmittingDetection(true); setDetectionError(''); setDetectionConfirm(false);
+    try {
+      const task = await detectCharacters(jobId, library.revision, language === 'en' ? 'en-US' : 'zh-CN');
+      if (identity !== requestIdentity.current || activeProject.current !== projectId) return;
+      detectionStartedAt.current = Date.now(); setDetectionTimedOut(false); setDetection(task);
+      if (task.status === 'SUCCEEDED') { const updated = await getCharacters(projectId); if (identity === requestIdentity.current && activeProject.current === projectId) setLibrary(updated); }
+    } catch (reason) { if (identity === requestIdentity.current) setDetectionError(errorMessage(reason, language)); }
+    finally { if (activeProject.current === projectId) setSubmittingDetection(false); }
   }
   async function save() {
     if (!draft || !library) return;
@@ -85,21 +154,28 @@ export default function CharacterPanel({ projectId, jobId, segments, disabled = 
   const valid = Boolean(draft?.appearance.trim() && (draft.status !== 'confirmed' || draft.preferred_name.trim()));
 
   return <section className="ve-character-panel" aria-label={t('人物卡', 'Character cards')}>
-    <button className="ve-character-heading" type="button" aria-expanded={open} onClick={() => { setOpen(value => !value); if (!open && !library && !loading) void load(); }}><Users size={17} /><strong>{t('人物卡', 'Character cards')}</strong>{library && <span>{library.characters.length}</span>}<ChevronDown size={15} /></button>
+    <button className="ve-character-heading" type="button" disabled={submittingDetection} aria-expanded={open} onClick={() => { setOpen(value => !value); if (!open) setLoading(true); }}><Users size={17} /><strong>{t('人物卡', 'Character cards')}</strong>{library && <span>{library.characters.length}</span>}<ChevronDown size={15} /></button>
     {open && <div className="ve-character-body">
       {loading && <Loading />}
-      {library && <><p className="ve-evidence-caption">{t('按外观区分人物，确认后统一后续版本的称呼。', 'Identify characters by appearance and confirm names for future versions.')}</p>
+      {library && <><p className="ve-evidence-caption">{t('自动提取人物外观，确认称呼后用于后续版本。', 'Extract character appearances automatically, then confirm names for future versions.')}</p>
+        {automaticDetection && automaticDetection.status !== 'DISABLED' && <p className="ve-evidence-caption" role="status">{automaticDetection.status === 'FAILED' ? t('本版本人物识别未完成：', 'Character detection for this version did not finish: ') + (automaticDetection.error ?? '') : (automaticDetection.skipped_count ?? 0) > 0 ? counts(automaticDetection) + t('人物卡已达上限。', 'Character card limit reached.') : automaticDetection.coverage?.frame_count === 0 ? t('本版本暂无可分析关键帧。', 'This version has no keyframes available for analysis.') : ((automaticDetection.added_count ?? 0) + (automaticDetection.updated_count ?? 0)) > 0 ? counts(automaticDetection) : t('本版本自动识别未发现新人物候选。', 'Automatic detection found no new character candidates in this version.')}</p>}
+        <div className="ve-character-detection-actions"><button type="button" className="ws-button secondary" disabled={disabled || cardBusy || !jobId || loading || draftDirty || library.characters.length >= 40} onClick={() => setDetectionConfirm(true)}>{detecting || submittingDetection ? <LoaderCircle size={15} className="ws-spin" /> : <ScanSearch size={15} />}{detecting ? t('正在识别人物', 'Detecting characters') : t('自动识别人物', 'Detect characters')}</button>{!jobId && <small>{t('生成视频后可识别人物。', 'Generate a video version to detect characters.')}</small>}</div>
+        {detection && <div className="ve-character-detection-status" role="status">{detection.status === 'RUNNING' ? <><LoaderCircle size={14} className="ws-spin" />{detectionTimedOut ? t('识别结果尚未确认，请继续检查。', 'Detection has not finished. Continue checking the result.') : t('正在分析画面中的人物外观…', 'Analyzing visible character appearances…')}</> : detection.status === 'SUCCEEDED' ? (detection.skipped_count ?? 0) > 0 ? counts(detection) + t('人物卡已达上限。', 'Character card limit reached.') : detection.coverage?.frame_count === 0 ? t('暂无可分析关键帧。', 'No keyframes are available for analysis.') : ((detection.added_count ?? 0) + (detection.updated_count ?? 0)) > 0 ? counts(detection) : t('未发现新的人物候选。可换一个版本重试或手动补充。', 'No new character candidates found. Try another version or add a card manually.') : detection.error || t('人物识别失败，请重试。', 'Character detection failed. Please retry.')}{detection.coverage && <small>{t('已检查 ', 'Reviewed ') + detection.coverage.frame_count + t(' 帧画面', ' frames')}</small>}</div>}
+        {detectionTimedOut && detecting && <button type="button" className="ws-button secondary" onClick={() => { detectionStartedAt.current = Date.now(); setDetectionTimedOut(false); setDetectionPoll(value => value + 1); }}>{t('继续检查识别结果', 'Check detection again')}</button>}
+        {detection?.status === 'FAILED' && <button type="button" className="ws-text-button" disabled={loading || cardBusy} onClick={() => void load()}>{t('重新加载人物卡', 'Reload character cards')}</button>}
+        {detectionError && <Alert>{detectionError}{detecting ? t(' 正在保留任务并尝试重新连接。', ' The task is retained while reconnecting.') : <button type="button" className="ws-text-button" disabled={cardBusy || loading} onClick={() => void load()}>{t('重新加载人物卡', 'Reload character cards')}</button>}</Alert>}
         <div className="ve-character-list">{library.characters.map(character => <article key={character.id} className="ve-character-card">
           {character.thumbnail ? <img src={character.thumbnail.url} alt={character.appearance} loading="lazy" /> : <span className="ve-character-placeholder"><Users size={21} /></span>}
           <div><small>{code(character)}</small><strong>{character.preferred_name || t('未命名人物', 'Unnamed character')}</strong><p>{character.appearance}</p>{character.thumbnail && <small>{t('原片 ', 'Source ') + frameTime(character.thumbnail.timestamp)}</small>}<span>{character.status === 'confirmed' ? t('已确认', 'Confirmed') : t('待确认', 'Unconfirmed')}</span></div>
-          <div className="ve-character-card-actions"><button className="ws-icon-button" type="button" disabled={disabled} aria-label={t('编辑人物 ', 'Edit character ') + (character.preferred_name || code(character))} onClick={() => edit(character)}><Pencil size={14} /></button><button className="ws-text-button" type="button" disabled={disabled || !character.preferred_name || !jobId} onClick={() => checkNames(character)}>{t('检查称呼', 'Check names')}</button></div>
+          <div className="ve-character-card-actions"><button className="ws-icon-button" type="button" disabled={disabled || cardBusy || loading} aria-label={t('编辑人物 ', 'Edit character ') + (character.preferred_name || code(character))} onClick={() => edit(character)}><Pencil size={14} /></button><button className="ws-text-button" type="button" disabled={disabled || cardBusy || loading || !character.preferred_name || !jobId} onClick={() => checkNames(character)}>{t('检查称呼', 'Check names')}</button></div>
         </article>)}</div>
-        {!library.characters.length && <p className="ve-evidence-caption">{t('可从口述稿的画面依据中添加人物。', 'Add characters from the visual evidence beside a narration segment.')}</p>}
-        <button className="ws-button secondary" type="button" disabled={disabled || library.characters.length >= 40} onClick={() => edit(emptyCharacter())}><Plus size={14} />{t('新增人物卡', 'New character card')}</button>
+        {!library.characters.length && <p className="ve-evidence-caption">{t('识别后会生成待确认的人物卡，也可从画面依据中手动补充。', 'Detection creates unconfirmed character cards. You can also add one from visual evidence.')}</p>}
+        <button className="ws-button secondary" type="button" disabled={disabled || cardBusy || loading || library.characters.length >= 40} onClick={() => edit(emptyCharacter())}><Plus size={14} />{t('新增人物卡', 'New character card')}</button>
       </>}
       {error && !draft && <Alert>{error}<button className="ws-text-button" type="button" onClick={() => void load()}>{t('重试', 'Retry')}</button></Alert>}
       {notice && <p role="status" className="ve-evidence-caption">{notice}</p>}
     </div>}
+    {detectionConfirm && <Modal title={t('自动识别人物', 'Detect characters')} onClose={() => setDetectionConfirm(false)}><p className="ws-modal-intro">{t('将视频画面发送至 Azure，提取外观特征和人物候选。人物卡保持待确认，不推断真实身份。此操作按模型用量计费。', 'Video frames will be sent to Azure to extract appearances and character candidates. Cards remain unconfirmed; real identities are not inferred. Model usage is billed.')}</p><div className="ws-modal-actions"><button type="button" className="ws-button secondary" onClick={() => setDetectionConfirm(false)}>{t('取消', 'Cancel')}</button><button type="button" className="ws-button primary" disabled={disabled || cardBusy || draftDirty} onClick={() => void startDetection()}>{t('开始识别', 'Start detection')}</button></div></Modal>}
     {draft && !discardOpen && <Modal title={draft.id ? t('编辑人物卡', 'Edit character card') : t('添加人物卡', 'Add character card')} onClose={close} busy={saving}>
       <form onSubmit={event => { event.preventDefault(); void save(); }} className="ve-character-form">
         {frame && <label className="ws-field">{t('关联人物', 'Link character')}<select value={draft.id} disabled={saving} onChange={event => edit(library?.characters.find(item => item.id === event.target.value) ?? emptyCharacter(), frame)}><option value="">{t('新人物', 'New character')}</option>{library?.characters.map(item => <option value={item.id} key={item.id}>{item.preferred_name || code(item)} · {item.appearance}</option>)}</select></label>}
@@ -111,7 +187,7 @@ export default function CharacterPanel({ projectId, jobId, segments, disabled = 
         <label className="ws-field">{t('此前称呼 / 别名', 'Previous names / aliases')}<input aria-label={t('人物别名', 'Character aliases')} value={aliases} disabled={saving} placeholder={t('以逗号分隔', 'Separate with commas')} onChange={event => setAliases(event.target.value)} /></label>
         <label className="ve-confirm-character"><input type="checkbox" checked={draft.status === 'confirmed'} disabled={saving} onChange={event => setDraft({ ...draft, status: event.target.checked ? 'confirmed' : 'unconfirmed' })} />{t('已确认此人物及称呼', 'Confirm this character and name')}</label>
         {error && <Alert>{error}<span>{t(' 当前人物修改已保留。版本冲突时请取消编辑，再重新加载人物卡。', ' Your character edits are retained. For a revision conflict, cancel editing and reload the cards.')}</span></Alert>}
-        <div className="ws-modal-actions"><button type="button" className="ws-button secondary" disabled={saving} onClick={close}>{t('取消', 'Cancel')}</button><button className="ws-button primary" disabled={saving || disabled || !valid || !draftDirty}>{saving ? t('保存中…', 'Saving…') : t('保存人物卡', 'Save character')}</button></div>
+        <div className="ws-modal-actions"><button type="button" className="ws-button secondary" disabled={saving} onClick={close}>{t('取消', 'Cancel')}</button><button className="ws-button primary" disabled={saving || disabled || detecting || submittingDetection || !valid || !draftDirty}>{saving ? t('保存中…', 'Saving…') : t('保存人物卡', 'Save character')}</button></div>
       </form>
     </Modal>}
     {discardOpen && <Modal title={t('人物卡尚未保存', 'Unsaved character card')} onClose={() => setDiscardOpen(false)}><p>{t('是否放弃当前人物卡修改？', 'Discard the current character edits?')}</p><div className="ws-modal-actions"><button className="ws-button secondary" onClick={() => setDiscardOpen(false)}>{t('继续编辑', 'Keep editing')}</button><button className="ws-button danger" onClick={discard}>{t('放弃修改', 'Discard changes')}</button></div></Modal>}

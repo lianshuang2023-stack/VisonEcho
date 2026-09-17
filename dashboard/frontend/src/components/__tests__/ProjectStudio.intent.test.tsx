@@ -160,13 +160,28 @@ it('submits source dialogue and narration language independently', async () => {
   renderStudio();
   await screen.findByRole('textbox', { name: '口述稿 1' });
   const dialogue = screen.getByRole('combobox', { name: '原片对白语言' });
+  expect(screen.getByRole('checkbox', { name: /自动识别人物/ })).toBeChecked();
   expect(dialogue).toHaveValue('auto');
   fireEvent.change(dialogue, { target: { value: 'en-US' } });
   fireEvent.change(screen.getByRole('combobox', { name: '解说语言' }), { target: { value: 'zh-CN' } });
   expect(dialogue).toHaveValue('en-US');
   fireEvent.click(screen.getByRole('button', { name: '生成一个新版本' }));
   fireEvent.click(screen.getByRole('button', { name: '确认并开始' }));
-  await waitFor(() => expect(mocks.generateNarration).toHaveBeenCalledWith('video-1', 'zh-CN', 'zh-CN-XiaoxiaoNeural', 'auto', 'en-US'));
+  await waitFor(() => expect(mocks.generateNarration).toHaveBeenCalledWith('video-1', 'zh-CN', 'zh-CN-XiaoxiaoNeural', 'auto', 'en-US', true));
+});
+
+it('restores the per-version automatic detection preference and permits opting in', async () => {
+  mocks.getProject.mockResolvedValue({ ...detail, executions: [{ ...job, detect_characters: false }] });
+  mocks.generateNarration.mockResolvedValue({ execution_arn: 'new-job', start_date: job.start_date });
+  renderStudio();
+  await screen.findByRole('textbox', { name: '口述稿 1' });
+  const option = screen.getByRole('checkbox', { name: /自动识别人物/ });
+  expect(option).not.toBeChecked();
+  fireEvent.click(option);
+  fireEvent.click(screen.getByRole('button', { name: '生成一个新版本' }));
+  expect(screen.getByRole('dialog')).toHaveTextContent('保持待确认，不推断真实身份');
+  fireEvent.click(screen.getByRole('button', { name: '确认并开始' }));
+  await waitFor(() => expect(mocks.generateNarration).toHaveBeenCalledWith('video-1', 'en-US', 'en-US-JennyNeural', 'auto', 'auto', true));
 });
 
 it('calibrates using dialogue language even after narration language changes', async () => {

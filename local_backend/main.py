@@ -36,6 +36,7 @@ class ExecutionRequest(BaseModel):
     dialogue_language: Literal["auto", "en-US", "zh-CN"] | None = None
     voice: str | None = None
     narration_mode: Literal['auto', 'standard', 'extended'] = 'auto'
+    detect_characters: bool = Field(default=True, strict=True)
 
 class Store:
     def __init__(self, settings):
@@ -99,7 +100,9 @@ def run_job(store, job_id, video_id, min_gap, source_result=None, edits=None):
                        dialogue_language=job_config.get('dialogue_language', store.settings.dialogue_language),
                        azure_speech_voice=job_config.get('voice', store.settings.azure_speech_voice),
                        narration_mode=job_config.get('narration_mode', 'auto'),
-                       character_context=copy.deepcopy(job_config.get('character_context', [])))
+                       character_context=copy.deepcopy(job_config.get('character_context', [])),
+                       character_library=copy.deepcopy(job_config.get('character_library', [])),
+                       detect_characters=bool(job_config.get('detect_characters', False) and source_result is None))
     def update_step(name, status, detail):
         with store.lock:
             job = store.data['executions'][job_id]
@@ -115,6 +118,10 @@ def run_job(store, job_id, video_id, min_gap, source_result=None, edits=None):
             store.save()
     try:
         if source_result is None:
+            if settings.detect_characters and settings.character_library:
+                from .character_detection import enrich_character_references
+                settings.character_library = enrich_character_references(
+                    store, settings.character_library, settings, video_id=video_id)
             result = process_video(store.root / 'input' / f'{video_id}.mp4',
                                    store.root / 'runs' / job_id, settings, min_gap, update_step)
         else:
@@ -129,18 +136,33 @@ def run_job(store, job_id, video_id, min_gap, source_result=None, edits=None):
         if not path.is_relative_to((store.root / 'runs' / job_id).resolve()) or not path.is_file():
             raise RuntimeError('Processing finished without a readable output video.')
         result['output_path'] = str(path)
-        (store.root / 'runs' / job_id / 'result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2))
         with store.lock:
+            before = copy.deepcopy(store.data)
             job = store.data['executions'][job_id]
-            job.update(status='SUCCEEDED', stop_date=now(), result=result)
             source = store.data['inputs'][video_id]
+            candidates = result.pop('character_candidates', [])
+            if settings.detect_characters and result.get('character_detection', {}).get('status') == 'SUCCEEDED':
+                from .character_detection import merge_detected_characters
+                try:
+                    counts = merge_detected_characters(source, candidates, job_config.get('character_revision', 0))
+                    result['character_detection'].update(counts)
+                except (HTTPException, ValueError) as error:
+                    detail = error.detail if isinstance(error, HTTPException) else str(error)
+                    result['character_detection'].update(status='FAILED', error=settings.redact(detail))
+            job.update(status='SUCCEEDED', stop_date=now(), result=result)
             store.data['outputs'][job_id] = {
                 'key': job_id, 'video_id': job_id,
                 'filename': Path(source['filename']).stem + '-described.mp4',
                 'pipeline_version': 'azure-local', 'last_modified': now(),
                 'size_bytes': path.stat().st_size,
             }
-            store.save()
+            try:
+                (store.root / 'runs' / job_id / 'result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2))
+                store.save()
+            except Exception:
+                store.data.clear()
+                store.data.update(before)
+                raise
     except Exception as exc:
         with store.lock:
             job = store.data['executions'][job_id]
@@ -152,7 +174,7 @@ def run_job(store, job_id, video_id, min_gap, source_result=None, edits=None):
     finally:
         store.busy.release()
 
-def enqueue_job(store, background, video_id, min_gap=2, language=None, source_result=None, edits=None, source_execution_id=None, voice=None, narration_mode='auto', dialogue_language=None):
+def enqueue_job(store, background, video_id, min_gap=2, language=None, source_result=None, edits=None, source_execution_id=None, voice=None, narration_mode='auto', dialogue_language=None, detect_characters=False):
     language = language or store.settings.speech_language
     dialogue_language = dialogue_language or (source_result or {}).get('dialogue_language') or store.settings.dialogue_language
     if dialogue_language not in ('auto', 'en-US', 'zh-CN'):
@@ -164,19 +186,25 @@ def enqueue_job(store, background, video_id, min_gap=2, language=None, source_re
     if not store.busy.acquire(blocking=False):
         raise HTTPException(409, 'A video is already processing. Wait for it to finish.')
     job_id, started = uuid.uuid4().hex, now()
-    steps = STEPS if source_result is None else ['ValidateInput', 'SynthesizeAudio', 'MixAudioTracks', 'RecordSummary']
+    steps = list(STEPS) if source_result is None else ['ValidateInput', 'SynthesizeAudio', 'MixAudioTracks', 'RecordSummary']
+    if source_result is None and detect_characters:
+        steps.insert(steps.index('GenerateDVI'), 'DetectCharacters')
     try:
         from .characters import confirmed_character_context
         character_context = (confirmed_character_context(store, video_id) if source_result is None
                              else copy.deepcopy(source_result.get('character_context', [])))
         with store.lock:
-            require_video(store.data, video_id)
+            source = require_video(store.data, video_id)
+            cards = copy.deepcopy(source.get('character_cards', {'revision': 0, 'characters': []}))
             store.data['executions'][job_id] = {
                 'execution_arn': job_id, 'video_id': video_id,
                 'status': 'RUNNING', 'start_date': started, 'stop_date': None,
                 'error': None, 'cause': None, 'language': language, 'voice': voice,
                 'dialogue_language': dialogue_language,
                 'character_context': character_context,
+                'character_library': cards['characters'],
+                'character_revision': cards['revision'],
+                'detect_characters': bool(detect_characters and source_result is None),
                 'kind': 'generate' if source_result is None else 'render',
                 'narration_mode': narration_mode,
                 'source_execution_id': source_execution_id, 'min_silence_duration': min_gap,
@@ -311,7 +339,8 @@ def create_app(settings=None):
             if store.data['inputs'][payload.video_id].get('archived'):
                 raise HTTPException(409, 'Restore the archived video project before processing.')
         return enqueue_job(store, background, payload.video_id, language=payload.language, voice=payload.voice,
-                           narration_mode=payload.narration_mode, dialogue_language=payload.dialogue_language)
+                           narration_mode=payload.narration_mode, dialogue_language=payload.dialogue_language,
+                           detect_characters=payload.detect_characters)
 
     def get_job(job_id):
         with store.lock:
@@ -323,7 +352,7 @@ def create_app(settings=None):
 
     @app.get('/api/trigger/executions/{job_id}/status')
     def status(job_id: str):
-        return {k: v for k, v in get_job(job_id).items() if k not in ('result', 'character_context')}
+        return {k: v for k, v in get_job(job_id).items() if k not in ('result', 'character_context', 'character_library')}
 
     @app.get('/api/videos')
     def videos():
@@ -390,6 +419,7 @@ def create_app(settings=None):
     from .calibration import register_calibration_routes
     from .evidence import register_evidence_routes
     from .characters import register_character_routes
+    from .character_detection import register_character_detection_routes
     from .collections import register_collection_routes
     register_collection_routes(app, store, settings)
     register_project_routes(app, store, settings)
@@ -397,4 +427,5 @@ def create_app(settings=None):
     register_calibration_routes(app, store, settings)
     register_evidence_routes(app, store, settings)
     register_character_routes(app, store, settings)
+    register_character_detection_routes(app, store, settings)
     return app

@@ -461,6 +461,8 @@ def process_video(input_path: Path, output_dir: Path, settings: Any, min_silence
     on_step("ValidateInput", "SUCCEEDED", {"video_duration": media["duration"], "has_audio": media["has_audio"]})
     usage = {"openai_requests": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
              "transcription_audio_seconds": 0.0, "tts_requests": 0, "tts_characters": 0}
+    character_candidates = []
+    character_detection = {'status': 'DISABLED', 'added_count': 0, 'error': None}
     with httpx.Client(timeout=httpx.Timeout(600, connect=20), follow_redirects=False) as client:
         on_step("TranscribeVideo", "RUNNING", {})
         if media["has_audio"]:
@@ -497,7 +499,29 @@ def process_video(input_path: Path, output_dir: Path, settings: Any, min_silence
         frames = [_extract_frames(input_path, frame_dir,
                    {'start_time': s['source_start'], 'silence_duration': s['source_end'] - s['source_start']}
                    if use_extended else s, s["segment_index"], settings) for s in segments]
+        for segment, segment_frames in zip(segments, frames):
+            segment['frame_timestamps'] = [round(frame['timestamp'], 3) for frame in segment_frames]
         on_step("AnalyzeSilenceSegments", "SUCCEEDED", {"frame_count": sum(map(len, frames)), "num_segments": len(segments)})
+        if _setting(settings, 'detect_characters', False):
+            on_step('DetectCharacters', 'RUNNING', {})
+            from .character_detection import analyze_character_frames
+            references = [{**frame, 'job_id': output_dir.name, 'segment_index': segment['segment_index'],
+                           'frame_id': f'f{ordinal}'}
+                          for segment, segment_frames in zip(segments, frames)
+                          for ordinal, frame in enumerate(segment_frames)]
+            try:
+                detected = analyze_character_frames(references, _setting(settings, 'character_library', []), settings, client)
+                character_candidates = detected['candidates']
+                character_detection = {'status': 'SUCCEEDED', 'added_count': 0, 'error': None,
+                                       'coverage': detected.get('coverage', {}), 'usage': detected.get('usage', {})}
+                usage['openai_requests'] += int(detected.get('usage', {}).get('openai_requests', 0))
+                for name in ('prompt_tokens', 'completion_tokens', 'total_tokens'):
+                    usage[name] += int(detected.get('usage', {}).get(name) or 0)
+                on_step('DetectCharacters', 'SUCCEEDED', {})
+            except (PipelineError, ValueError) as error:
+                character_detection = {'status': 'FAILED', 'added_count': 0,
+                    'error': settings.redact(error) if hasattr(settings, 'redact') else str(error)}
+                on_step('DetectCharacters', 'FAILED', {})
         on_step("GenerateDVI", "RUNNING", {"num_segments": len(segments)})
         previous = []
         for segment, segment_frames in zip(segments, frames):
@@ -515,6 +539,7 @@ def process_video(input_path: Path, output_dir: Path, settings: Any, min_silence
         def checkpoint(stage):
             temporary = output_dir / 'generation-checkpoint.json.tmp'
             temporary.write_text(json.dumps({'stage': stage, 'segments': segments, 'usage': usage,
+                'character_candidates': character_candidates, 'character_detection': character_detection,
                 'source_video_duration': media['duration'], 'narration_mode': 'extended' if use_extended else 'standard',
                 'language': _setting(settings, 'speech_language', 'en-US'),
                 'dialogue_language': transcript.get('language', 'und'),
@@ -582,6 +607,7 @@ def process_video(input_path: Path, output_dir: Path, settings: Any, min_silence
         summary['message'] = '已使用扩展口述：在句间暂停画面播放解说，原对白完整保留，成片时长增加。'
     outcome = 'subtitles_only' if not summary['passed_segments'] else 'partial' if summary['failed_segments'] else 'audio_description'
     result = {"segments": segments, "summary": summary, "output_path": str(output_path), "usage": usage,
+              'character_candidates': character_candidates, 'character_detection': character_detection,
               "transcript_path": str(transcript_path), "narration_path": str(narration_path),
               'source_transcript_path': str(source_transcript_path), 'insertions': insertions,
               'narration_mode': 'extended' if use_extended else 'standard', 'outcome': outcome}

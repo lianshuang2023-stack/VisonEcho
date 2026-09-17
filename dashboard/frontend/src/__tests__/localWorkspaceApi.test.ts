@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { calibrateTranscript, createCollection, deleteCollection, deleteVideo, exportUrl, generateNarration, getCharacters, getSegmentEvidence, getTranscriptCalibration, listHistoryVideos, listProjects, outputUrl, patchProject, renderNarration, restoreCollection, restoreVideo, saveCharacters, saveEvidenceFeedback, saveTranscript } from '../localWorkspaceApi';
+import { calibrateTranscript, createCollection, deleteCollection, deleteVideo, detectCharacters, getCharacterDetection, getLatestCharacterDetection, exportUrl, generateNarration, getCharacters, getSegmentEvidence, getTranscriptCalibration, listHistoryVideos, listProjects, outputUrl, patchProject, renderNarration, restoreCollection, restoreVideo, saveCharacters, saveEvidenceFeedback, saveTranscript } from '../localWorkspaceApi';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -10,6 +10,24 @@ function mockRequest() {
 }
 
 describe('VisionEcho video API requests', () => {
+  it('starts character detection with the known revision and polls without resubmission', async () => {
+    const fetchMock = mockRequest();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ detection_id: 'd/1', job_id: 'job/1', status: 'RUNNING' }) });
+    await detectCharacters('job/1', 7, 'en-US');
+    await getCharacterDetection('d/1');
+    await getLatestCharacterDetection('video/1');
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/videos/job%2F1/characters/detect', '/api/character-detections/d%2F1', '/api/projects/video%2F1/characters/detection/latest']);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ revision: 7, language: 'en-US' });
+  });
+  it('rejects malformed scan responses rather than reporting a completed scan', async () => {
+    mockRequest();
+    await expect(getCharacterDetection('d1')).rejects.toThrow('invalid character detection status');
+  });
+  it('can opt out of automatic character detection on a generated version', async () => {
+    const fetchMock = mockRequest();
+    await generateNarration('video-1', 'en-US', 'en-US-JennyNeural', 'auto', 'auto', false);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).detect_characters).toBe(false);
+  });
   it('loads evidence and updates a known feedback revision on the segment route', async () => {
     const fetchMock = mockRequest();
     await getSegmentEvidence('job/1', 2);
@@ -110,7 +128,7 @@ describe('VisionEcho video API requests', () => {
     await generateNarration('video-1', 'zh-CN', 'zh-CN-YunxiNeural');
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('/api/trigger/executions');
-    expect(JSON.parse(init.body)).toEqual({ video_id: 'video-1', language: 'zh-CN', dialogue_language: 'auto', voice: 'zh-CN-YunxiNeural' });
+    expect(JSON.parse(init.body)).toEqual({ video_id: 'video-1', language: 'zh-CN', dialogue_language: 'auto', voice: 'zh-CN-YunxiNeural', detect_characters: true });
   });
 
   it('changes the voice while sending only editable narration text fields', async () => {
@@ -125,7 +143,7 @@ describe('VisionEcho video API requests', () => {
     const fetchMock = mockRequest();
     await generateNarration('video-1', 'zh-CN', 'zh-CN-YunxiNeural', 'auto', 'en-US');
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
-      video_id: 'video-1', language: 'zh-CN', dialogue_language: 'en-US', voice: 'zh-CN-YunxiNeural', narration_mode: 'auto',
+      video_id: 'video-1', language: 'zh-CN', dialogue_language: 'en-US', voice: 'zh-CN-YunxiNeural', narration_mode: 'auto', detect_characters: true,
     });
     await calibrateTranscript('job-1', 'auto', 0);
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ language: 'auto', revision: 0 });

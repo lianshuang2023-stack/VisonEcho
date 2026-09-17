@@ -294,7 +294,7 @@ describe('local video workspace', () => {
     expect(mocks.generateNarration).not.toHaveBeenCalled();
     mocks.generateNarration.mockResolvedValue({ execution_arn: 'job-new', start_date: '2026-09-16T00:00:00Z' });
     fireEvent.click(screen.getByRole('button', { name: '确认并开始' }));
-    await waitFor(() => expect(mocks.generateNarration).toHaveBeenCalledWith('video-1', 'en-US', 'en-US-JennyNeural', 'auto', 'auto'));
+    await waitFor(() => expect(mocks.generateNarration).toHaveBeenCalledWith('video-1', 'en-US', 'en-US-JennyNeural', 'auto', 'auto', true));
   });
 
   it('switches generation language and its compatible voices without changing the old narration language', async () => {
@@ -311,7 +311,7 @@ describe('local video workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '生成一个新版本' }));
     mocks.generateNarration.mockResolvedValue({ execution_arn: 'job-new', start_date: '2026-09-16T00:00:00Z' });
     fireEvent.click(screen.getByRole('button', { name: '确认并开始' }));
-    await waitFor(() => expect(mocks.generateNarration).toHaveBeenCalledWith('video-1', 'zh-CN', 'zh-CN-YunxiNeural', 'auto', 'auto'));
+    await waitFor(() => expect(mocks.generateNarration).toHaveBeenCalledWith('video-1', 'zh-CN', 'zh-CN-YunxiNeural', 'auto', 'auto', true));
   });
 
   it('allows voice-only re-rendering and keeps the selected voice after a failed request', async () => {

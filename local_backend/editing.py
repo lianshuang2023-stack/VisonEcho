@@ -55,6 +55,7 @@ def register_edit_routes(app, store, settings, enqueue):
             'narration_mode': result.get('narration_mode', 'standard'),
             'outcome': result.get('outcome', 'audio_description' if any(s.get('pass') for s in result.get('segments', [])) else 'subtitles_only'),
             'insertions': result.get('insertions', []),
+            'character_detection': result.get('character_detection'),
         }
 
     @app.post('/api/videos/{job_id}/render')

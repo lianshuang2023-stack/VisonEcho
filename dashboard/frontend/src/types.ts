@@ -48,6 +48,7 @@ export interface ExecutionStatus extends ExecutionStarted {
 }
 
 export interface ProjectExecution extends ExecutionStatus {
+  detect_characters?: boolean;
   video_id?: string;
   language?: VideoLanguage;
   dialogue_language?: DialogueLanguage;
@@ -154,6 +155,7 @@ export interface TimelineInsertion {
 }
 
 export interface NarrationEditor {
+  character_detection?: { status: 'DISABLED' | 'SUCCEEDED' | 'FAILED'; added_count?: number; updated_count?: number; skipped_count?: number; candidate_count?: number; error?: string | null; coverage?: { frame_count: number; segment_count: number } };
   segments: NarrationSegment[];
   language: VideoLanguage;
   dialogue_language?: DialogueLanguage;
@@ -197,3 +199,15 @@ export interface VideoCharacter {
 }
 export interface CharacterLibrary { revision: number; characters: VideoCharacter[] }
 export type CharacterFrameSelection = CharacterThumbnail;
+export interface CharacterDetection {
+  detection_id: string;
+  status: 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+  job_id: string;
+  added_count?: number;
+  updated_count?: number;
+  candidate_count?: number;
+  skipped_count?: number;
+  error_code?: number;
+  coverage?: { frame_count: number; segment_count: number };
+  error?: string | null;
+}

@@ -1,12 +1,12 @@
 import { requestJson } from './api';
 import type {
-  CharacterLibrary, EvidenceFeedback, SegmentEvidence, DialogueLanguage, ExecutionStarted, NarrationEditor, NarrationMode, NarrationSegment,
+  CharacterDetection, CharacterLibrary, EvidenceFeedback, SegmentEvidence, DialogueLanguage, ExecutionStarted, NarrationEditor, NarrationMode, NarrationSegment,
   ProjectCollection, ProjectDetail, ProjectTrash, Transcript, TranscriptCalibration,
   VideoLanguage, VideoProject,
 } from './types';
 
 export type {
-  CharacterLibrary, CharacterFrameSelection, CharacterOccurrence, CharacterThumbnail, VideoCharacter, EvidenceFeedback, EvidenceFrame, EvidenceIssue, SegmentEvidence,
+  CharacterDetection, CharacterLibrary, CharacterFrameSelection, CharacterOccurrence, CharacterThumbnail, VideoCharacter, EvidenceFeedback, EvidenceFrame, EvidenceIssue, SegmentEvidence,
   DialogueLanguage, NarrationEditor, NarrationMode, NarrationSegment, ProjectCollection,
   ProjectDetail, ProjectExecution, ProjectStatus, ProjectTrash, TimelineInsertion,
   Transcript, TranscriptCalibration, TranscriptCue, VideoLanguage, VideoProject, WorkflowStatus,
@@ -97,12 +97,12 @@ export function getNarration(jobId: string): Promise<NarrationEditor> {
 
 export function generateNarration(
   videoId: string, language: VideoLanguage, voice: string,
-  narrationMode?: NarrationMode, dialogueLanguage: DialogueLanguage = 'auto',
+  narrationMode?: NarrationMode, dialogueLanguage: DialogueLanguage = 'auto', detectCharacters = true,
 ): Promise<ExecutionStarted> {
   return requestJson('/trigger/executions', {
     method: 'POST',
     body: JSON.stringify({
-      video_id: videoId, language, dialogue_language: dialogueLanguage, voice,
+      video_id: videoId, language, dialogue_language: dialogueLanguage, voice, detect_characters: detectCharacters,
       ...(narrationMode ? { narration_mode: narrationMode } : {}),
     }),
   });
@@ -149,4 +149,24 @@ export function saveCharacters(projectId: string, library: CharacterLibrary): Pr
       } : null,
     })) }),
   });
+}
+
+function characterDetection(value: CharacterDetection): CharacterDetection {
+  if (!value || typeof value.detection_id !== 'string' || !value.detection_id || typeof value.job_id !== 'string' || !['RUNNING', 'SUCCEEDED', 'FAILED'].includes(value.status)) {
+    throw new Error('The service returned an invalid character detection status. Reload and try again.');
+  }
+  return value;
+}
+
+export async function detectCharacters(jobId: string, revision: number, language: VideoLanguage): Promise<CharacterDetection> {
+  return characterDetection(await requestJson(versionPath(jobId) + '/characters/detect', { method: 'POST', body: JSON.stringify({ revision, language }) }));
+}
+
+export async function getCharacterDetection(detectionId: string): Promise<CharacterDetection> {
+  return characterDetection(await requestJson('/character-detections/' + pathId(detectionId)));
+}
+
+export async function getLatestCharacterDetection(projectId: string): Promise<CharacterDetection | null> {
+  const value = await requestJson<CharacterDetection | null>(projectPath(projectId) + '/characters/detection/latest');
+  return value === null ? null : characterDetection(value);
 }
