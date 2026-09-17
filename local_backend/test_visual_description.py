@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from local_backend.pipeline import PipelineError, _extract_frames, _frame_times, _generate_description
+from local_backend.pipeline import PipelineError, _extract_frames, _frame_times, _generate_description, _fictional_role_context
 
 
 def settings():
@@ -113,6 +113,30 @@ def test_model_cannot_invent_character_card_ids(tmp_path):
         with pytest.raises(PipelineError):
             _generate_description({'start_time': 0, 'end_time': 5, 'silence_duration': 5},
                                   [{'path': frame, 'timestamp': 1}], {'phrases': []}, [], settings(), client)
+
+
+def test_recognized_fictional_role_is_usable_in_the_same_generation_interval(tmp_path):
+    recognition = {'kind': 'fictional', 'name': 'Spider-Man', 'confidence': 'high',
+                   'evidence': 'Web-pattern red-blue suit and white mask lenses'}
+    candidates = [{'appearance': 'Red-blue suit', 'recognition': recognition,
+                   'occurrences': [{'segment_index': 1}]}]
+    config = settings()
+    config.detected_fictional_roles = _fictional_role_context(candidates)
+    assert _fictional_role_context([{**candidates[0], 'recognition': {**recognition, 'confidence': 'low'}}]) == []
+    assert _fictional_role_context([{**candidates[0], 'recognition': {**recognition, 'kind': 'real_person'}}]) == []
+    frame = tmp_path / 'image.jpg'; frame.write_bytes(b'synthetic-image')
+    contexts = []
+    def handle(request):
+        messages = json.loads(request.content)['messages']
+        contexts.append(json.loads(messages[1]['content'][0]['text']))
+        assert 'Never identify a real actor' in messages[0]['content']
+        return httpx.Response(200, json=completion('Spider-Man swings.'))
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        for index in [0, 1]:
+            _generate_description({'segment_index': index, 'start_time': 0, 'end_time': 5, 'silence_duration': 5},
+                                  [{'path': frame, 'timestamp': 1}], {'phrases': []}, [], config, client)
+    assert contexts[0]['current_interval_fictional_roles'] == []
+    assert contexts[1]['current_interval_fictional_roles'][0]['name'] == 'Spider-Man'
 
 
 def test_overlong_description_gets_one_bounded_rewrite_and_counts_usage(tmp_path):

@@ -235,3 +235,65 @@ def test_occurrences_are_validated_without_extracting_any_frames(workspace, monk
     assert response.status_code == 200
     assert len(response.json()['characters'][0]['occurrences']) == 200
     assert client.get('/api/projects/video/characters').status_code == 200
+
+
+def recognized_card(**overrides):
+    return card(id='recognized-hero', preferred_name='蜘蛛侠', status='recognized',
+                recognition={'kind': 'fictional', 'name': '蜘蛛侠', 'confidence': 'high',
+                             'evidence': '红蓝网纹制服和蜘蛛标志。'}, **overrides)
+
+
+def test_recognized_fictional_role_is_available_to_narration_and_roundtrips(workspace):
+    client, store, _ = workspace
+    original = recognized_card()
+    store.data['inputs']['video']['character_cards'] = {'revision': 2, 'characters': [original]}
+    context = characters.confirmed_character_context(store, 'video')
+    assert context[0]['preferred_name'] == '蜘蛛侠' and context[0]['recognition']['kind'] == 'fictional'
+    saved = client.get('/api/projects/video/characters').json()
+    saved['characters'][0]['aliases'] = ['红蓝制服角色']
+    response = client.put('/api/projects/video/characters', json=saved)
+    assert response.status_code == 200, response.text
+    assert response.json()['characters'][0]['status'] == 'recognized'
+    assert response.json()['characters'][0]['recognition'] == original['recognition']
+
+
+@pytest.mark.parametrize('field,value', [('preferred_name', '小蜘蛛'), ('appearance', '红蓝制服，白色面罩眼片')])
+def test_manual_edit_clears_recognition_and_uses_human_confirmation(workspace, field, value):
+    client, store, _ = workspace
+    store.data['inputs']['video']['character_cards'] = {'revision': 1, 'characters': [recognized_card()]}
+    document = client.get('/api/projects/video/characters').json()
+    document['characters'][0][field] = value
+    response = client.put('/api/projects/video/characters', json=document)
+    assert response.status_code == 200, response.text
+    saved = response.json()['characters'][0]
+    assert saved['status'] == 'confirmed' and saved['recognition'] is None
+    assert 'recognition' not in characters.confirmed_character_context(store, 'video')[0]
+
+
+def test_user_can_confirm_or_demote_recognized_card_without_keeping_model_claim(workspace):
+    client, store, _ = workspace
+    store.data['inputs']['video']['character_cards'] = {'revision': 1, 'characters': [recognized_card()]}
+    document = client.get('/api/projects/video/characters').json()
+    document['characters'][0]['status'] = 'confirmed'
+    document['characters'][0].pop('recognition')
+    response = client.put('/api/projects/video/characters', json=document)
+    assert response.status_code == 200 and response.json()['characters'][0]['recognition'] is None
+    document = response.json()
+    document['characters'][0]['status'] = 'unconfirmed'
+    document['characters'][0]['preferred_name'] = ''
+    response = client.put('/api/projects/video/characters', json=document)
+    assert response.status_code == 200 and response.json()['characters'][0]['status'] == 'unconfirmed'
+    assert characters.confirmed_character_context(store, 'video') == []
+
+
+def test_manual_api_cannot_create_or_tamper_with_automatic_recognition(workspace):
+    client, store, _ = workspace
+    new_card = recognized_card()
+    new_card['id'] = ''
+    assert client.put('/api/projects/video/characters', json={'revision': 0, 'characters': [new_card]}).status_code == 422
+    store.data['inputs']['video']['character_cards'] = {'revision': 1, 'characters': [recognized_card()]}
+    before = copy.deepcopy(store.data['inputs']['video']['character_cards'])
+    document = client.get('/api/projects/video/characters').json()
+    document['characters'][0]['recognition']['evidence'] = 'Invented evidence.'
+    assert client.put('/api/projects/video/characters', json=document).status_code == 422
+    assert store.data['inputs']['video']['character_cards'] == before

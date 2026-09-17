@@ -47,6 +47,7 @@ class Settings:
     character_context: list[dict] = field(default_factory=list, repr=False)
     character_library: list[dict] = field(default_factory=list, repr=False)
     detect_characters: bool = False
+    detected_fictional_roles: list[dict] = field(default_factory=list, repr=False)
     max_video_seconds: float = 600
     max_upload_bytes: int = 500 * 1024 * 1024
     ffmpeg_bin: str = "ffmpeg"

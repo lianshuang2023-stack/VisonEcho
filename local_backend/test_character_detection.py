@@ -52,6 +52,11 @@ def model_response(characters, **overrides):
     return result
 
 
+def recognition(**overrides):
+    return {'kind': 'fictional', 'name': '蜘蛛侠', 'confidence': 'high',
+            'evidence': '红蓝网纹制服，胸前蜘蛛标志和白色面罩眼片。', **overrides}
+
+
 def fake_client(body, status=200):
     requests = []
     def handle(request):
@@ -417,3 +422,81 @@ def test_enrichment_drops_untrusted_stale_or_cross_video_anchors(workspace):
     store.data['executions']['job'].pop('deleted_at')
     (store.root / 'runs/job/frames/segment-000-0.jpg').unlink()
     assert 'reference_image' not in detection.enrich_character_references(store, [forged], config, 'video')[0]
+
+
+def test_distinctive_fictional_design_can_create_an_immediately_named_card(tmp_path):
+    http, requests = fake_client(model_response([{'appearance': '红蓝制服和网纹面罩。', 'frame_indices': [0, 1],
+                                                'existing_id': None, 'recognition': recognition()}]))
+    result = detection.analyze_character_frames(frames(tmp_path), [], settings(tmp_path), http)
+    assert result['candidates'][0]['recognition'] == recognition()
+    source = {}
+    detection.merge_detected_characters(source, result['candidates'])
+    saved = source['character_cards']['characters'][0]
+    assert saved['status'] == 'recognized' and saved['preferred_name'] == '蜘蛛侠'
+    assert saved['recognition'] == recognition()
+    prompt = requests[0]['messages'][0]['content']
+    assert 'Spider-Man' in prompt and 'Never name actors' in prompt
+
+
+@pytest.mark.parametrize('confidence', ['medium', 'low'])
+def test_uncertain_fictional_label_never_becomes_an_applied_name(confidence):
+    source = {}
+    detected = candidate()
+    detected['recognition'] = recognition(confidence=confidence)
+    detection.merge_detected_characters(source, [detected])
+    saved = source['character_cards']['characters'][0]
+    assert saved['status'] == 'unconfirmed' and saved['preferred_name'] == ''
+    assert saved.get('recognition') is None
+
+
+@pytest.mark.parametrize('bad', [
+    {'kind': 'real_person'}, {'name': ''}, {'evidence': ''}, {'evidence': ' '},
+    {'confidence': 'certain'}, {'name': 'x' * 101}, {'extra': 'unsupported'},
+])
+def test_invalid_or_real_person_recognition_is_rejected_without_retry(tmp_path, bad):
+    http, requests = fake_client(model_response([{'appearance': 'Costumed character.', 'frame_indices': [0],
+                                                'existing_id': None, 'recognition': recognition(**bad)}]))
+    with pytest.raises(PipelineError):
+        detection.analyze_character_frames(frames(tmp_path), [], settings(tmp_path), http)
+    assert len(requests) == 1
+
+
+def test_recognition_fills_existing_blank_but_preserves_all_manual_names():
+    for status, name in [('unconfirmed', ''), ('unconfirmed', 'My description'), ('confirmed', 'Hero')]:
+        original = card(status=status, name=name)
+        source = {'character_cards': {'revision': 1, 'characters': [deepcopy(original)]}}
+        proposal = candidate(existing_id='known')
+        proposal['recognition'] = recognition()
+        merged = detection.merge_detected_characters(source, [proposal], 1)
+        saved = source['character_cards']['characters'][0]
+        if not name:
+            assert saved['status'] == 'recognized' and saved['preferred_name'] == '蜘蛛侠'
+            assert merged['updated_count'] == 1
+        else:
+            assert saved == original and merged['updated_count'] == 0
+
+
+def test_same_card_can_update_automatic_fictional_label_without_changing_manual_appearance():
+    original = card(status='recognized', name='Spider-Man', recognition=recognition(name='Spider-Man'))
+    source = {'character_cards': {'revision': 1, 'characters': [deepcopy(original)]}}
+    proposal = candidate('Model appearance changed', existing_id='known')
+    proposal['recognition'] = recognition()
+    assert detection.merge_detected_characters(source, [proposal], 1)['updated_count'] == 1
+    saved = source['character_cards']['characters'][0]
+    assert saved['preferred_name'] == '蜘蛛侠' and saved['appearance'] == original['appearance']
+    assert saved['aliases'] == original['aliases'] + ['Spider-Man']
+
+
+def test_automatic_role_rename_preserves_bounded_alias_history():
+    for aliases, can_rename in [(['SPIDER-MAN'], True), ([f'old-{index}' for index in range(20)], False)]:
+        original = card(status='recognized', name='Spider-Man', recognition=recognition(name='Spider-Man'), aliases=aliases)
+        source = {'character_cards': {'revision': 1, 'characters': [deepcopy(original)]}}
+        proposal = candidate(existing_id='known')
+        proposal['recognition'] = recognition()
+        counts = detection.merge_detected_characters(source, [proposal], 1)
+        saved = source['character_cards']['characters'][0]
+        assert saved['aliases'] == aliases
+        if can_rename:
+            assert saved['preferred_name'] == '蜘蛛侠' and counts['updated_count'] == 1
+        else:
+            assert saved == original and counts['updated_count'] == 0 and counts['revision'] == 1

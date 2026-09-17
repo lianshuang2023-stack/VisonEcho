@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 import uuid
 
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from .lifecycle import require_video, video_running
 
@@ -27,12 +27,29 @@ class CharacterThumbnail(CharacterOccurrence):
     url: str | None = Field(default=None, max_length=1000)
 
 
+class CharacterRecognition(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    kind: Literal['fictional']
+    name: str = Field(min_length=1, max_length=100)
+    confidence: Literal['high', 'medium', 'low']
+    evidence: str = Field(min_length=1, max_length=600)
+
+    @field_validator('name', 'evidence')
+    @classmethod
+    def meaningful_text(cls, value):
+        value = ' '.join(value.split())
+        if not value:
+            raise ValueError('Recognition requires a name and visible design evidence.')
+        return value
+
+
 class CharacterCard(BaseModel):
     model_config = ConfigDict(extra='forbid')
     id: str = Field(default='', max_length=80, pattern=r'^[A-Za-z0-9_-]*$')
     appearance: str = Field(default='', max_length=600)
     preferred_name: str = Field(default='', max_length=100)
-    status: Literal['unconfirmed', 'confirmed'] = 'unconfirmed'
+    status: Literal['unconfirmed', 'confirmed', 'recognized'] = 'unconfirmed'
+    recognition: CharacterRecognition | None = None
     aliases: list[Annotated[str, Field(min_length=1, max_length=100)]] = Field(default_factory=list, max_length=20)
     thumbnail: CharacterThumbnail | None = None
     occurrences: list[CharacterOccurrence] = Field(default_factory=list, max_length=200)
@@ -59,6 +76,11 @@ def _document(source):
     ids = [card['id'] for card in document['characters']]
     if any(not identifier for identifier in ids) or len(ids) != len(set(ids)):
         raise HTTPException(409, '人物卡标识无效，请恢复本地项目数据后重试。')
+    for card in document['characters']:
+        recognition = card.get('recognition')
+        if card['status'] == 'recognized' and (not recognition or recognition['confidence'] != 'high'
+                or recognition['name'] != card['preferred_name'] or not card['appearance'].strip()):
+            raise HTTPException(409, '角色识别依据无效，请恢复本地人物卡数据后重试。')
     return document
 
 
@@ -145,6 +167,20 @@ def _normalize(payload, current):
         card['id'] = identifier
         for key in ('appearance', 'preferred_name'):
             card[key] = ' '.join(card[key].split())
+        previous_card = existing.get(identifier, {})
+        previous_recognition = previous_card.get('recognition')
+        if card.get('recognition') is not None and card['recognition'] != previous_recognition:
+            raise HTTPException(422, '自动识别依据只能由识别任务生成，不能手动新增或修改。')
+        if card['status'] == 'recognized':
+            if previous_card.get('status') != 'recognized' or not previous_recognition:
+                raise HTTPException(422, '新人物请使用待确认或已确认状态。')
+            if any(card.get(key) != previous_card.get(key) for key in ('appearance', 'preferred_name', 'recognition')):
+                card['recognition'] = None
+                card['status'] = 'confirmed' if card['appearance'] and card['preferred_name'] else 'unconfirmed'
+        else:
+            # A user-confirmed correction becomes user naming guidance; the
+            # original model observation no longer claims to validate it.
+            card['recognition'] = None
         if card['status'] == 'confirmed' and (not card['appearance'] or not card['preferred_name']):
             raise HTTPException(422, '确认人物前，请填写外观特征和称呼。')
         aliases = []
@@ -174,12 +210,13 @@ def _normalize(payload, current):
 
 
 def confirmed_character_context(store, video_id):
-    """Copy only user-confirmed naming guidance; never infer identity or mutate."""
+    """Copy human names and visually recognized fictional-character guidance."""
     with store.lock:
         source = require_video(store.data, video_id)
         document = _document(source)
-        return [{key: card[key] for key in ('id', 'appearance', 'preferred_name', 'aliases')}
-                for card in document['characters'] if card['status'] == 'confirmed'
+        return [{**{key: card[key] for key in ('id', 'appearance', 'preferred_name', 'aliases')},
+                 **({'recognition': card['recognition']} if card['status'] == 'recognized' else {})}
+                for card in document['characters'] if card['status'] in ('confirmed', 'recognized')
                 and card['appearance'].strip() and card['preferred_name'].strip()]
 
 

@@ -179,9 +179,21 @@ it('restores the per-version automatic detection preference and permits opting i
   expect(option).not.toBeChecked();
   fireEvent.click(option);
   fireEvent.click(screen.getByRole('button', { name: '生成一个新版本' }));
-  expect(screen.getByRole('dialog')).toHaveTextContent('保持待确认，不推断真实身份');
+  expect(screen.getByRole('dialog')).toHaveTextContent('其余人物按外观区分，不推断真实身份');
   fireEvent.click(screen.getByRole('button', { name: '确认并开始' }));
   await waitFor(() => expect(mocks.generateNarration).toHaveBeenCalledWith('video-1', 'en-US', 'en-US-JennyNeural', 'auto', 'auto', true));
+});
+
+it.each([true, false])('restores generation detection preference %s without inheriting revoice opt-out', async (detectCharacters) => {
+  mocks.getProject.mockResolvedValue({ ...detail, executions: [
+    { ...job, execution_arn: 'render-job', kind: 'render', detect_characters: false },
+    { ...job, kind: 'generate', detect_characters: detectCharacters },
+  ] });
+  renderStudio();
+  await screen.findByRole('textbox', { name: '口述稿 1' });
+  const option = screen.getByRole('checkbox', { name: /自动识别人物/ });
+  if (detectCharacters) expect(option).toBeChecked();
+  else expect(option).not.toBeChecked();
 });
 
 it('calibrates using dialogue language even after narration language changes', async () => {

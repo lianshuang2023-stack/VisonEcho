@@ -8,11 +8,52 @@ const mocks = vi.hoisted(() => ({ getCharacters: vi.fn(), saveCharacters: vi.fn(
 vi.mock('../../localWorkspaceApi', () => mocks);
 const library: CharacterLibrary = { revision: 4, characters: [{ id: 'person-1', appearance: 'Red coat', preferred_name: 'Ann', status: 'confirmed', aliases: [], thumbnail: null, occurrences: [{ job_id: 'job-1', segment_index: 0 }] }] };
 const segments: NarrationSegment[] = [{ segment_index: 0, dvi_text: 'Ann opens the door.', start_time: 1, end_time: 5, silence_duration: 4, audio_duration: 3, pass: true }];
+const recognizedLibrary: CharacterLibrary = { revision: 8, characters: [{ ...library.characters[0], id: 'spider-1', preferred_name: 'Spider-Man', status: 'recognized', aliases: ['masked hero'], recognition: { kind: 'fictional', name: 'Spider-Man', confidence: 'high', evidence: 'Red and blue suit with a spider emblem and white eye lenses.' } }] };
 beforeEach(() => { mocks.getLatestCharacterDetection.mockResolvedValue(null); mocks.getCharacters.mockResolvedValue(library); mocks.saveCharacters.mockImplementation(async (_id, data) => ({ ...data, revision: 5 })); });
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 function setup() { const ref = createRef<CharacterPanelHandle>(); const props = { ref, projectId: 'video-1', jobId: 'job-1', segments, onDirtyChange: vi.fn(), onBusyChange: vi.fn(), onApply: vi.fn() }; render(<CharacterPanel {...props} />); return props; }
 
 describe('character cards', () => {
+  it('shows an automatically named fictional character as recognized and permits checking existing aliases', async () => {
+    mocks.getCharacters.mockResolvedValue(recognizedLibrary);
+    const onApply = vi.fn();
+    render(<CharacterPanel projectId="video-1" jobId="job-1" segments={[{ ...segments[0], dvi_text: 'The masked hero opens the door.' }]} onDirtyChange={vi.fn()} onBusyChange={vi.fn()} onApply={onApply} />);
+    fireEvent.click(screen.getByRole('button', { name: '人物卡' }));
+    expect(await screen.findByText('Spider-Man')).toBeVisible();
+    expect(screen.getByText('已识别')).toBeVisible();
+    expect(screen.queryByText('待确认')).not.toBeInTheDocument();
+    expect(screen.getByText(/Red and blue suit with a spider emblem/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '检查称呼' }));
+    const dialog = screen.getByRole('dialog', { name: '更新当前口述稿中的称呼' });
+    expect(within(dialog).getByText('The Spider-Man opens the door.')).toBeVisible();
+    expect(onApply).not.toHaveBeenCalled();
+  });
+
+  it('preserves recognized status and provenance when only aliases are edited', async () => {
+    mocks.getCharacters.mockResolvedValue(recognizedLibrary);
+    setup(); fireEvent.click(screen.getByRole('button', { name: '人物卡' }));
+    fireEvent.click(await screen.findByRole('button', { name: '编辑人物 Spider-Man' }));
+    expect(screen.getByRole('checkbox', { name: '已确认此人物及称呼' })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: '保存人物卡' })).toBeDisabled();
+    fireEvent.change(screen.getByRole('textbox', { name: '人物别名' }), { target: { value: 'masked hero, web-slinger' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存人物卡' }));
+    await waitFor(() => expect(mocks.saveCharacters).toHaveBeenCalledOnce());
+    expect(mocks.saveCharacters.mock.calls[0][1].characters[0]).toMatchObject({ status: 'recognized', preferred_name: 'Spider-Man', recognition: recognizedLibrary.characters[0].recognition });
+  });
+
+  it('makes an edited automatic name a manual confirmation without retaining model provenance', async () => {
+    mocks.getCharacters.mockResolvedValue(recognizedLibrary);
+    setup(); fireEvent.click(screen.getByRole('button', { name: '人物卡' }));
+    fireEvent.click(await screen.findByRole('button', { name: '编辑人物 Spider-Man' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '人物统一称呼' }), { target: { value: '蜘蛛侠' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存人物卡' }));
+    await waitFor(() => expect(mocks.saveCharacters).toHaveBeenCalledOnce());
+    const saved = mocks.saveCharacters.mock.calls[0][1].characters[0];
+    expect(saved.status).toBe('confirmed');
+    expect(saved.preferred_name).toBe('蜘蛛侠');
+    expect(saved).not.toHaveProperty('recognition');
+  });
+
   it('saves a name with the revision and waits for selected script replacements', async () => {
     const props = setup(); fireEvent.click(screen.getByRole('button', { name: '人物卡' }));
     fireEvent.click(await screen.findByRole('button', { name: '编辑人物 Ann' }));
@@ -62,7 +103,7 @@ describe('character cards', () => {
     const button = await screen.findByRole('button', { name: '自动识别人物' });
     expect(mocks.detectCharacters).not.toHaveBeenCalled();
     fireEvent.click(button);
-    expect(screen.getByRole('dialog', { name: '自动识别人物' })).toHaveTextContent('人物卡保持待确认');
+    expect(screen.getByRole('dialog', { name: '自动识别人物' })).toHaveTextContent('识别明显的影视、动画角色并统一称呼');
     mocks.detectCharacters.mockResolvedValue({ detection_id: 'd1', status: 'RUNNING', job_id: 'job-1' });
     mocks.getCharacterDetection.mockResolvedValue({ detection_id: 'd1', status: 'SUCCEEDED', job_id: 'job-1', added_count: 1, coverage: { frame_count: 4, segment_count: 2 } });
     const candidate = { ...library.characters[0], id: 'detected-1', preferred_name: '', status: 'unconfirmed' };

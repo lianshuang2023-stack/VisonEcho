@@ -192,7 +192,8 @@ export interface VideoCharacter {
   id: string;
   appearance: string;
   preferred_name: string;
-  status: 'unconfirmed' | 'confirmed';
+  status: 'unconfirmed' | 'confirmed' | 'recognized';
+  recognition?: { kind: 'fictional'; name: string; confidence: 'high' | 'medium' | 'low'; evidence: string };
   aliases: string[];
   thumbnail: CharacterThumbnail | null;
   occurrences: CharacterOccurrence[];
