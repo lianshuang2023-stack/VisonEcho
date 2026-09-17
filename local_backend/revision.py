@@ -13,7 +13,7 @@ import httpx
 from .pipeline import (
     MAX_AUDIO_SPEED, SAMPLE_RATE, PipelineError, StepCallback, _mix_video,
     _number, _run, _setting, _synthesize, _word_count, audio_speed_to_fit,
-    build_narration_track, probe_media, speech_service_urls,
+    build_narration_track, probe_media, speech_synthesis_url,
 )
 
 
@@ -76,7 +76,7 @@ def render_revision(input_path: Path, output_dir: Path, settings: Any,
     if any(segment["dvi_text"] for segment in segments):
         if not _setting(settings, "azure_speech_key"):
             raise PipelineError("Configure the server-side Azure Speech key before rendering narration.")
-        speech_service_urls(settings)
+        speech_synthesis_url(settings)
     output_dir.mkdir(parents=True, exist_ok=True)
     audio_dir = output_dir / "narration"
     audio_dir.mkdir()

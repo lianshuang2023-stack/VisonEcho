@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { calibrateTranscript, createCollection, deleteCollection, deleteVideo, generateNarration, getTranscriptCalibration, listHistoryVideos, listProjects, patchProject, renderNarration, restoreCollection, restoreVideo, setVideoReview } from '../localWorkspaceApi';
+import { calibrateTranscript, createCollection, deleteCollection, deleteVideo, exportUrl, generateNarration, getTranscriptCalibration, listHistoryVideos, listProjects, outputUrl, patchProject, renderNarration, restoreCollection, restoreVideo, saveTranscript } from '../localWorkspaceApi';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -57,15 +57,33 @@ describe('VisionEcho video API requests', () => {
     expect(JSON.parse(init.body)).toEqual({ collection_id: 'collection-2' });
   });
 
-  it('reviews a specific transcript revision and returns the authoritative review state', async () => {
+  it('saves only editable subtitle fields and the revision used for conflict detection', async () => {
     const fetchMock = mockRequest();
-    const result = { reviewed: true, reviewed_at: '2026-09-16T00:00:00Z', transcript_revision: 3 };
+    const result = { cues: [{ id: 'cue-1', start: 1, end: 2, text: 'Hello' }], revision: 4 };
     fetchMock.mockResolvedValueOnce({ ok: true, json: async () => result });
-    expect(await setVideoReview('job-1', true, 3)).toEqual(result);
+    expect(await saveTranscript('job/1', { ...result, revision: 3, quality: { review_required: true } })).toEqual(result);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('/api/videos/job-1/review');
-    expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body)).toEqual({ reviewed: true, transcript_revision: 3 });
+    expect(url).toBe('/api/videos/job%2F1/transcript');
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body)).toEqual({ cues: result.cues, revision: 3 });
+  });
+
+  it('preserves a subtitle conflict instead of treating the save as successful', async () => {
+    const fetchMock = mockRequest();
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ detail: 'Subtitles changed. Reload this version.' }) });
+    await expect(saveTranscript('job-1', { cues: [], revision: 1 })).rejects.toThrow('Subtitles changed. Reload this version.');
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('encodes project filters and version download paths', async () => {
+    const fetchMock = mockRequest();
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ projects: [] }) });
+    await listProjects(false, 'Travel & 2026');
+    const url = new URL(fetchMock.mock.calls[0][0], 'http://localhost');
+    expect(url.searchParams.get('collection_id')).toBe('Travel & 2026');
+    expect(url.searchParams.get('status')).toBe('all');
+    expect(exportUrl('job/1', 'dialogue', 'srt')).toBe('/api/videos/job%2F1/export?kind=dialogue&format=srt');
+    expect(outputUrl('job/1')).toBe('/api/media/output/job%2F1');
   });
 
   it('sends language and voice without a user-specified silence threshold', async () => {

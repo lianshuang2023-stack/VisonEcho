@@ -76,8 +76,8 @@ def _root_endpoint(value: str, label: str) -> str:
     return value
 
 
-def speech_service_urls(settings: Any) -> tuple[str, str]:
-    """Use an explicit resource endpoint or region; never guess the region."""
+def speech_synthesis_url(settings: Any) -> str:
+    """Resolve the Neural TTS URL from an explicit resource endpoint or region."""
     endpoint = _setting(settings, "azure_speech_endpoint").strip()
     if endpoint:
         root = _root_endpoint(endpoint, "Azure Speech endpoint").split("/api/projects/", 1)[0]
@@ -85,12 +85,11 @@ def speech_service_urls(settings: Any) -> tuple[str, str]:
             if root.endswith(suffix):
                 root = root[:-len(suffix)]
                 break
-        return root + "/speechtotext/transcriptions:transcribe", root + "/tts/cognitiveservices/v1"
+        return root + "/tts/cognitiveservices/v1"
     region = _setting(settings, "azure_speech_region").strip()
     if not re.fullmatch(r"[a-z0-9-]+", region):
         raise PipelineError("Set AZURE_SPEECH_ENDPOINT or the exact AZURE_SPEECH_REGION for this resource.")
-    return (f"https://{region}.api.cognitive.microsoft.com/speechtotext/transcriptions:transcribe",
-            f"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1")
+    return f"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1"
 
 
 def _chat_url(settings: Any) -> str:
@@ -127,41 +126,6 @@ def _request(client: httpx.Client, service: str, settings: Any, url: str, **kwar
         if secret:
             message = message.replace(secret, "[REDACTED]")
     raise PipelineError(message[:1000])
-
-
-def parse_transcription(payload: dict[str, Any]) -> dict[str, Any]:
-    """Normalize Fast Transcription's ABSOLUTE millisecond word offsets."""
-    phrases = payload.get("phrases")
-    if not isinstance(phrases, list):
-        raise PipelineError("Azure Speech returned no word timing list; dialogue windows cannot be calculated safely.")
-    words, normalized = [], []
-    for phrase in phrases:
-        if not isinstance(phrase, dict):
-            raise PipelineError("Azure Speech returned an invalid phrase.")
-        text = str(phrase.get("text") or "").strip()
-        phrase_words = phrase.get("words") or []
-        if text and not phrase_words:
-            raise PipelineError("Azure Speech recognized dialogue but omitted word timestamps. Check the Fast Transcription API version.")
-        for word in phrase_words:
-            if not isinstance(word, dict):
-                raise PipelineError("Azure Speech returned an invalid word timestamp.")
-            start = _number(word.get("offsetMilliseconds"), "Word offset") / 1000
-            duration = _number(word.get("durationMilliseconds"), "Word duration") / 1000
-            if start < 0 or duration <= 0:
-                raise PipelineError("Azure Speech returned an invalid word duration or offset.")
-            words.append({"text": str(word.get("text") or ""), "start": start, "end": start + duration})
-        if text:
-            start = _number(phrase.get("offsetMilliseconds"), "Phrase offset") / 1000
-            duration = _number(phrase.get("durationMilliseconds"), "Phrase duration") / 1000
-            if start < 0 or duration <= 0:
-                raise PipelineError("Azure Speech returned an invalid phrase duration or offset.")
-            normalized.append({"text": text, "start": start, "end": start + duration})
-    if not words and any(isinstance(p, dict) and str(p.get("text") or "").strip() for p in payload.get("combinedPhrases", [])):
-        raise PipelineError("Azure Speech returned dialogue text without word timings.")
-    words.sort(key=lambda w: (w["start"], w["end"]))
-    normalized.sort(key=lambda p: p["start"])
-    return {"text": " ".join(p["text"] for p in normalized), "words": words,
-            "phrases": normalized, "timing_source": "speech_words"}
 
 
 def calculate_dialogue_windows(words: list[dict[str, Any]], duration: float,
@@ -230,23 +194,6 @@ def make_ssml(text: str, voice: str, language: str, rate_percent: int = 0) -> st
 
 def _word_count(text: str) -> int:
     return len(re.findall(r"[\u3400-\u9fff]|[^\W\u3400-\u9fff]+(?:['’][^\W\u3400-\u9fff]+)*", text))
-
-
-def _transcribe(audio_path: Path, settings: Any, client: httpx.Client) -> dict[str, Any]:
-    url, _ = speech_service_urls(settings)
-    with audio_path.open("rb") as audio:
-        response = _request(client, "Azure Speech Fast Transcription", settings, url,
-                            params={"api-version": _setting(settings, "azure_speech_api_version", "2025-10-15")},
-                            headers={"Ocp-Apim-Subscription-Key": _setting(settings, "azure_speech_key")},
-                            files={"audio": ("dialogue.wav", audio, "audio/wav"),
-                                   "definition": (None, json.dumps({"locales": [_setting(settings, "speech_language", "en-US")]}), "application/json")})
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise PipelineError("Azure Speech returned an invalid transcription response.") from exc
-    if not isinstance(payload, dict):
-        raise PipelineError("Azure Speech returned an invalid transcription response.")
-    return parse_transcription(payload)
 
 
 def _frame_times(start: float, duration: float, cuts: list[float]) -> list[float]:
@@ -396,14 +343,14 @@ def _generate_description(segment: dict[str, Any], frames: list[dict[str, Any]],
 
 
 def _synthesize(text: str, output_path: Path, window_duration: float, settings: Any, client: httpx.Client) -> int:
-    _, url = speech_service_urls(settings)
+    url = speech_synthesis_url(settings)
     estimated_seconds = _word_count(text) / (3.8 if _setting(settings, 'speech_language') == 'zh-CN' else 2.5)
     rate = min(20, max(0, math.ceil((estimated_seconds / max(0.2, window_duration - 0.1) - 1) * 100)))
     ssml = make_ssml(text, _setting(settings, "azure_speech_voice", "en-US-JennyNeural"), _setting(settings, "speech_language", "en-US"), rate)
     response = _request(client, "Azure Speech neural narration", settings, url,
                         headers={"Ocp-Apim-Subscription-Key": _setting(settings, "azure_speech_key"),
                                  "Content-Type": "application/ssml+xml", "X-Microsoft-OutputFormat": "riff-24khz-16bit-mono-pcm",
-                                 "User-Agent": "LocalAudioDescription/1.0"}, content=ssml.encode("utf-8"))
+                                 "User-Agent": "VisionEcho/1.0"}, content=ssml.encode("utf-8"))
     if not response.content.startswith(b"RIFF"):
         raise PipelineError("Azure Speech did not return the requested PCM WAV audio.")
     output_path.write_bytes(response.content)
@@ -438,19 +385,31 @@ def build_narration_track(segments: list[dict[str, Any]], output_path: Path, vid
 
 
 def _mix_video(input_path: Path, narration: Path, output_path: Path, segments: list[dict[str, Any]], media: dict[str, Any], settings: Any) -> None:
+    """Mix against the video clock, preserving delayed or shorter source audio.
+
+    A source soundtrack may start seconds after the first video frame. Both
+    inputs need PCM from time zero before amix, whose clock otherwise follows
+    the first source sample and shifts the entire narration into dialogue.
+    """
+    duration = f"{media['duration']:.6f}"
     command = [str(_setting(settings, "ffmpeg_bin", "ffmpeg")), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
                "-protocol_whitelist", "file,pipe", "-i", str(input_path),
                "-protocol_whitelist", "file,pipe", "-i", str(narration)]
+    # Fill the leading timestamp gap before resetting/combining any clocks.
+    # Bound padding so a short soundtrack cannot truncate or prolong export.
+    align = (f"aresample=48000:async=1:first_pts=0,apad,atrim=duration={duration},"
+             "aformat=sample_fmts=fltp:channel_layouts=stereo")
+    filters = [f"[1:a:0]{align}[narration]"]
     if media["has_audio"]:
         duck = "+".join(f"between(t,{s['start_time']:.6f},{s['start_time'] + s['audio_duration']:.6f})" for s in segments if s["pass"]) or "0"
-        filters = (f"[0:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.32:enable='{duck}'[bed];"
-                   "[1:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[narration];"
-                   "[bed][narration]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95:latency=1[mixed]")
-        command.extend(["-filter_complex", filters, "-map", "0:v:0", "-map", "[mixed]"])
+        filters.extend([f"[0:a:0]{align},volume=0.32:enable='{duck}'[bed]",
+                        "[bed][narration]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95:latency=1[mixed]"])
+        audio = "[mixed]"
     else:
-        command.extend(["-map", "0:v:0", "-map", "1:a:0"])
+        audio = "[narration]"
+    command.extend(["-filter_complex", ";".join(filters), "-map", "0:v:0", "-map", audio])
     command.extend(["-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-t", f"{media['duration']:.6f}",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-t", duration,
                     "-movflags", "+faststart", str(output_path)])
     _run(command, "Narrated video export", max(180, media["duration"] * 5))
     output_media = probe_media(output_path, settings)
@@ -471,7 +430,7 @@ def process_video(input_path: Path, output_dir: Path, settings: Any, min_silence
     if not _setting(settings, "azure_openai_api_key") or not _setting(settings, "azure_speech_key"):
         raise PipelineError("Configure server-side Azure OpenAI and Speech keys before processing.")
     _chat_url(settings)
-    speech_service_urls(settings)
+    speech_synthesis_url(settings)
     media = probe_media(input_path, settings)
     if not media["has_video"]:
         raise PipelineError("The uploaded file has no video stream.")

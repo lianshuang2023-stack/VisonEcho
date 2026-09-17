@@ -1,4 +1,7 @@
-## Code of Conduct
-This project has adopted the [Amazon Open Source Code of Conduct](https://aws.github.io/code-of-conduct).
-For more information see the [Code of Conduct FAQ](https://aws.github.io/code-of-conduct-faq) or contact
-opensource-codeofconduct@amazon.com with any additional questions or comments.
+# 协作约定
+
+VisionEcho 的讨论围绕产品、代码和可复现事实展开。尊重不同经验、语言及无障碍需求，为建议提供清楚背景，针对具体问题提出改进方式。
+
+未经允许，不分享他人的个人信息、私有视频、账号凭据或工作区内容。
+
+维护者可以要求修改不符合约定的内容，并限制持续破坏协作秩序的参与行为。需要处理争议时，使用已有的私密协作渠道联系仓库维护者。

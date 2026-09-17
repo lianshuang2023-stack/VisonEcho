@@ -118,7 +118,7 @@ chmod 600 .env.local
 
 ```bash
 .venv/bin/python -m pytest local_backend -q
-VITE_LOCAL_BACKEND=true npm --prefix dashboard/frontend run build
+npm --prefix dashboard/frontend run build
 cd dashboard/frontend
 ./node_modules/.bin/vitest run
 ```

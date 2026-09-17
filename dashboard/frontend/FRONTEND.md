@@ -6,7 +6,7 @@
 
 | 文件 | 职责 |
 |---|---|
-| `src/App.tsx` | 应用入口及运行模式选择 |
+| `src/App.tsx` | VisionEcho 工作区入口 |
 | `src/components/LocalVideoWorkspace.tsx` | 我的作品、搜索筛选、项目管理、上传与回收站 |
 | `src/components/workspace/ProjectStudio.tsx` | 生成设置、历史版本、播放器、口述稿和字幕编辑 |
 | `src/components/workspace/ComparisonPreview.tsx` | 原声与口述版对比预览 |
@@ -23,10 +23,10 @@
 ```bash
 cd dashboard/frontend
 npm ci
-VITE_LOCAL_BACKEND=true npm run dev -- --host 127.0.0.1 --port 5174 --strictPort
+npm run dev
 ```
 
-也可复制 `.env.local.example` 为 `.env.local`。Vite 在开发和预览模式下将 `/api/*` 转发至本地后端，包含上传与视频请求。只有 `VITE_LOCAL_BACKEND=true` 才会启用 VisionEcho 本地工作区。
+Vite 在开发和预览模式下将 `/api/*` 转发至本地后端，包含上传与视频请求。默认打开 VisionEcho 工作区，无需前端模式变量。
 
 ## 交互与数据
 
@@ -40,7 +40,7 @@ VITE_LOCAL_BACKEND=true npm run dev -- --host 127.0.0.1 --port 5174 --strictPort
 ## 构建与测试
 
 ```bash
-VITE_LOCAL_BACKEND=true npm run build
+npm run build
 ./node_modules/.bin/vitest run
 npm run lint
 ```

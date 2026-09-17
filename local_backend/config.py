@@ -35,12 +35,10 @@ class Settings:
     azure_openai_endpoint: str = ""
     azure_openai_api_key: str = field(default="", repr=False)
     azure_openai_deployment: str = "gpt-5.6-terra"
-    azure_project_endpoint: str = ""
     azure_speech_key: str = field(default="", repr=False)
     azure_speech_region: str = ""
     azure_speech_endpoint: str = ""
     azure_speech_voice: str = "en-US-JennyNeural"
-    azure_speech_api_version: str = "2025-10-15"
     speech_language: str = "en-US"
     # Source recognition is independent of the generated narration language.
     dialogue_language: str = "auto"
@@ -61,12 +59,10 @@ class Settings:
             azure_openai_endpoint=get("AZURE_OPENAI_ENDPOINT").rstrip("/"),
             azure_openai_api_key=key,
             azure_openai_deployment=get("AZURE_OPENAI_DEPLOYMENT", "gpt-5.6-terra"),
-            azure_project_endpoint=get("AZURE_PROJECT_ENDPOINT"),
             azure_speech_key=get("AZURE_SPEECH_KEY", key),
             azure_speech_region=get("AZURE_SPEECH_REGION"),
             azure_speech_endpoint=get("AZURE_SPEECH_ENDPOINT").rstrip("/"),
             azure_speech_voice=get("AZURE_SPEECH_VOICE", "en-US-JennyNeural"),
-            azure_speech_api_version=get("AZURE_SPEECH_API_VERSION", "2025-10-15"),
             speech_language=get("SPEECH_LANGUAGE", "en-US"),
             dialogue_language=get("DIALOGUE_LANGUAGE", "auto"),
             max_video_seconds=float(get("MAX_VIDEO_SECONDS", "600")),

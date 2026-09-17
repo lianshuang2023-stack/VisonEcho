@@ -52,7 +52,7 @@ npm ci
 ```bash
 .venv/bin/python -m pytest local_backend -q
 cd dashboard/frontend
-VITE_LOCAL_BACKEND=true npm run build
+npm run build
 ./node_modules/.bin/vitest run
 ```
 
@@ -85,7 +85,6 @@ VITE_LOCAL_BACKEND=true npm run build
 
 ## 当前已知限制
 
-- 普通模式对带非零音轨起点的视频存在混音错位问题；扩展模式单独处理音频时间轴。
 - 校准完成后的索引写入失败，可能出现任务报告失败但字幕已经替换；仍需完善提交回滚。
 - 生成完成到新版本加载之间的网络延迟或失败，可能导致草稿丢失或结果未自动刷新。
 - 校准中的页面刷新或新标签页不会自动恢复任务跟踪；可在任务结束后重新打开作品。

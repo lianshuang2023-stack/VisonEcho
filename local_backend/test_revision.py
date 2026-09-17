@@ -60,7 +60,7 @@ class RevisionTests(unittest.TestCase):
                                         ffmpeg_bin="ffmpeg", ffprobe_bin="ffprobe", max_video_seconds=10)
         self.steps = []
         # A regression must never silently start STT, vision, or any HTTP request.
-        for target in ("local_backend.pipeline._transcribe", "local_backend.pipeline._generate_description",
+        for target in ("local_backend.transcription.transcribe_audio", "local_backend.pipeline._generate_description",
                        "httpx.Client.post"):
             guard = patch(target, side_effect=AssertionError("Unexpected cloud request"))
             guard.start()
