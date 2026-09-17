@@ -27,6 +27,8 @@ LOGIN_LIMIT = 10
 CREATION_WINDOW = 60 * 60
 GUEST_LIMIT = 5
 REGISTER_LIMIT = 10
+PASSWORD_MIN_LENGTH = 12
+PASSWORD_MAX_LENGTH = 24
 _USERNAME = re.compile(r'[a-z0-9][a-z0-9_-]{2,31}\Z')
 _TOKEN = re.compile(r'[A-Za-z0-9_-]{32,128}\Z')
 
@@ -48,7 +50,7 @@ def _password_hash(password, salt):
 
 
 def _valid_password(password):
-    return isinstance(password, str) and 12 <= len(password) <= 128
+    return isinstance(password, str) and PASSWORD_MIN_LENGTH <= len(password) <= PASSWORD_MAX_LENGTH
 
 
 def _username(username):
@@ -211,7 +213,7 @@ class AccessStore:
         if normalized is None:
             raise AccessError(422, '用户名须为 3 至 32 位小写字母、数字、下划线或连字符，并以字母或数字开头。')
         if not _valid_password(password):
-            raise AccessError(422, '密码须为 12 至 128 个字符。')
+            raise AccessError(422, '密码须为 12 至 24 个字符。')
         salt = secrets.token_bytes(16)
         password_hash = _password_hash(password, salt)
         try:

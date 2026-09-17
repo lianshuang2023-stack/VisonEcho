@@ -9,7 +9,7 @@ import pytest
 from local_backend.access import (AccessError, AccessStore, ACCOUNT_TTL, GUEST_TTL,
                                   LOGIN_LIMIT, LOGIN_WINDOW, GUEST_LIMIT, REGISTER_LIMIT, CREATION_WINDOW)
 
-PASSWORD = 'correct horse battery staple'
+PASSWORD = 'correct-horse-battery'
 
 
 @pytest.fixture
@@ -141,7 +141,7 @@ def test_same_guest_cannot_be_upgraded_twice_concurrently(access):
 
 @pytest.mark.parametrize('username,password', [
     ('ab', PASSWORD), ('_abc', PASSWORD), ('a' * 33, PASSWORD), ('../owner', PASSWORD),
-    ('含中文', PASSWORD), ('a b', PASSWORD), ('owner', 'short'), ('owner', 'x' * 129), ('owner', None),
+    ('含中文', PASSWORD), ('a b', PASSWORD), ('owner', 'x' * 11), ('owner', 'x' * 25), ('owner', None),
 ])
 def test_registration_validates_inputs_without_accounts(access, username, password):
     store, _ = access
@@ -150,6 +150,14 @@ def test_registration_validates_inputs_without_accounts(access, username, passwo
     assert error.value.status_code == 422
     with sqlite3.connect(store.path) as connection:
         assert connection.execute('SELECT count(*) FROM principals').fetchone()[0] == 0
+
+
+@pytest.mark.parametrize('length', [12, 24])
+def test_password_length_boundaries_register_and_login(access, length):
+    store, _ = access
+    password = 'x' * length
+    registered = store.register('owner', password)
+    assert store.login('owner', password)['principal']['workspace_id'] == registered['principal']['workspace_id']
 
 
 def test_login_messages_do_not_reveal_account_existence(access):

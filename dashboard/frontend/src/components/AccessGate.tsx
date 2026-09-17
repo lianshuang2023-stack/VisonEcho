@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Clapperboard, Languages, LoaderCircle, Moon, Sun } from 'lucide-react';
-import { accessRequest, AccessSessionContext, uploadLimitLabel } from '../accessSession';
+import { accessRequest, AccessSessionContext } from '../accessSession';
 import type { AccessSession } from '../accessSession';
 import { useUiPreferences } from '../uiPreferences';
 import { Alert, Loading, Modal } from './workspace/WorkspaceShared';
@@ -14,12 +14,13 @@ function AccessForm({ mode, guest, busy, error, onSubmit, onMode }: { mode: Form
   const { t } = useUiPreferences();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  return <form className="ve-access-form" onSubmit={event => { event.preventDefault(); onSubmit(username.trim(), password); }}>
+  const passwordValid = password.length >= 12 && password.length <= 24;
+  return <form className="ve-access-form" onSubmit={event => { event.preventDefault(); if (!busy && username.trim() && passwordValid) onSubmit(username.trim(), password); }}>
     {guest && <p className="ve-access-note">{mode === 'register' ? t('注册后保留当前试用作品。', 'Registration keeps the videos in this trial workspace.') : t('登录已有账号会切换到该账号的作品，试用作品不会导入。', 'Logging in switches to that account’s videos. Trial videos are not imported.')}</p>}
     <label className="ws-field">{t('用户名', 'Username')}<input aria-label={t("用户名", "Username")} name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required minLength={3} maxLength={32} pattern={'[A-Za-z0-9_\\-]{3,32}'} disabled={busy} value={username} onChange={event => setUsername(event.target.value)} /><small>{t('3–32 位字母、数字、下划线或连字符', '3–32 letters, numbers, underscores or hyphens')}</small></label>
-    <label className="ws-field">{t('密码', 'Password')}<input aria-label={t("密码", "Password")} type="password" name="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} required minLength={12} maxLength={128} disabled={busy} value={password} onChange={event => setPassword(event.target.value)} /><small>{t('12–128 位字符', '12–128 characters')}</small></label>
+    <label className="ws-field">{t('密码', 'Password')}<input aria-label={t("密码", "Password")} type="password" name="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} required minLength={12} maxLength={24} disabled={busy} value={password} onChange={event => setPassword(event.target.value)} /><small>{t('12–24 位字符', '12–24 characters')}</small></label>
     {error && <Alert>{error}</Alert>}
-    <button className="ws-button primary" disabled={busy || !username.trim() || password.length < 12}>{busy ? <LoaderCircle size={16} className="ws-spin" /> : null}{mode === 'register' ? t('创建账号', 'Create account') : t('登录', 'Log in')}</button>
+    <button className="ws-button primary" disabled={busy || !username.trim() || !passwordValid}>{busy ? <LoaderCircle size={16} className="ws-spin" /> : null}{mode === 'register' ? t('创建账号', 'Create account') : t('登录', 'Log in')}</button>
     <button type="button" className="ws-text-button" disabled={busy} onClick={() => { setPassword(''); onMode(mode === 'login' ? 'register' : 'login'); }}>{mode === 'login' ? t('还没有账号？注册', 'New here? Create an account') : t('已有账号？登录', 'Already have an account? Log in')}</button>
   </form>;
 }
@@ -83,7 +84,7 @@ export default function AccessGate({ children }: { children: ReactNode }) {
       {loadError ? <><Alert>{loadError}</Alert><button className="ws-button secondary" disabled={busy} onClick={() => { setLoading(true); void refresh(); }}>{t('重新检查连接', 'Check connection again')}</button></> : <>
         <div className="ve-access-tabs"><button type="button" aria-pressed={formMode === 'login'} disabled={busy} onClick={() => { setFormMode('login'); setError(''); }}>{t('登录', 'Log in')}</button><button type="button" aria-pressed={formMode === 'register'} disabled={busy} onClick={() => { setFormMode('register'); setError(''); }}>{t('注册', 'Register')}</button></div>
         <AccessForm key={formMode} mode={formMode} guest={false} busy={busy} error={error} onMode={mode => { setFormMode(mode); setError(''); }} onSubmit={(username, password) => void authenticate(formMode === 'register' ? '/register' : '/login', { username, password })} />
-        <div className="ve-access-trial"><button type="button" className="ws-button secondary" disabled={busy} onClick={() => void authenticate('/guest')}>{t('先试用一下', 'Try as a guest')}</button>{session && <p>{t('访客试用 · 视频最长 ', 'Guest trial · Up to ')}{session.limits.max_video_seconds}{t(' 秒 · ', ' seconds · ')}{uploadLimitLabel(session.limits.max_upload_mb)} · {session.limits.guest_generations_remaining ?? '—'}{t(' 次 AI 处理', ' AI operations')}</p>}</div>
+        <div className="ve-access-trial"><button type="button" className="ws-button secondary" disabled={busy} onClick={() => void authenticate('/guest')}>{t('先试用一下', 'Try as a guest')}</button></div>
       </>}
     </main>
   </div>;

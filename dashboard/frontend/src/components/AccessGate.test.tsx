@@ -5,6 +5,7 @@ import AccessGate from './AccessGate';
 import AccessControls from './AccessControls';
 import { useAccessSession } from '../accessSession';
 import type { AccessSession } from '../accessSession';
+import { UiPreferencesContext } from '../uiPreferences';
 
 const limits = { max_video_seconds: 60, max_upload_mb: 1024, guest_generations_remaining: 5 };
 const anonymous: AccessSession = { mode: 'hosted', user: null, limits };
@@ -25,6 +26,37 @@ beforeEach(() => { request.mockResolvedValue(response(anonymous)); vi.stubGlobal
 afterEach(() => { cleanup(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
 
 describe('hosted workspace access', () => {
+  it.each([11, 12, 24, 25])('accepts only passwords within 12–24 characters at length %s', async (length) => {
+    setup();
+    const username = await screen.findByLabelText('用户名');
+    const password = screen.getByLabelText('密码');
+    fireEvent.change(username, { target: { value: 'tester' } });
+    fireEvent.change(password, { target: { value: 'a'.repeat(length) } });
+    expect(password).toHaveAttribute('minlength', '12');
+    expect(password).toHaveAttribute('maxlength', '24');
+    expect(screen.getByText('12–24 位字符')).toBeVisible();
+    const form = password.closest('form')!;
+    const submit = within(form).getByRole('button', { name: '登录' });
+    if (length < 12 || length > 24) {
+      expect(submit).toBeDisabled();
+      fireEvent.submit(form);
+      expect(request).toHaveBeenCalledOnce();
+    } else {
+      expect(submit).toBeEnabled();
+      request.mockResolvedValueOnce(response(account));
+      fireEvent.submit(form);
+      await screen.findByRole('heading', { name: 'account-1 private videos' });
+      expect(JSON.parse(request.mock.calls[1][1].body).password).toHaveLength(length);
+    }
+  });
+
+  it('keeps the guest button without a trial sentence in English', async () => {
+    render(<UiPreferencesContext.Provider value={{ language: 'en', theme: 'light', setLanguage: vi.fn(), setTheme: vi.fn(), t: (_zh, en) => en }}><AccessGate><Workspace /></AccessGate></UiPreferencesContext.Provider>);
+    expect(await screen.findByRole('button', { name: 'Try as a guest' })).toBeVisible();
+    expect(screen.getByText('12–24 characters')).toBeVisible();
+    expect(screen.queryByText(/Guest trial ·/)).not.toBeInTheDocument();
+  });
+
   it('does not mount a private workspace until the session is established', async () => {
     let resolve!: (value: ReturnType<typeof response>) => void;
     request.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
@@ -33,7 +65,7 @@ describe('hosted workspace access', () => {
     await act(async () => resolve(response(anonymous)));
     expect(await screen.findByRole('heading', { name: '口述电影工作台' })).toBeVisible();
     expect(screen.getByRole('button', { name: '先试用一下' })).toBeVisible();
-    expect(screen.getByText('访客试用 · 视频最长 60 秒 · 1 GB · 5 次 AI 处理')).toBeVisible();
+    expect(screen.queryByText(/访客试用 · 视频最长/)).not.toBeInTheDocument();
     expect(mounts).not.toHaveBeenCalled();
     expect(request.mock.calls.map(([url]) => url)).toEqual(['/api/access/session']);
   });

@@ -21,7 +21,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request as ASGIRequest
 from starlette.staticfiles import StaticFiles
 
-from .access import AccessError, AccessStore
+from .access import AccessError, AccessStore, PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH
 
 COOKIE = 'visionecho_session'
 GUEST_SECONDS = 60
@@ -34,7 +34,7 @@ PAID_ROUTE = re.compile(r'^/api/(?:trigger/executions|videos/[^/]+/(?:render|tra
 class Credentials(BaseModel):
     model_config = ConfigDict(extra='forbid')
     username: str = Field(min_length=3, max_length=32)
-    password: str = Field(min_length=12, max_length=128)
+    password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
 
 
 class Workspaces:
@@ -185,7 +185,7 @@ def create_hosted_app(settings):
 
     @app.exception_handler(RequestValidationError)
     async def invalid_credentials(request, error):
-        return JSONResponse({'error': '请输入有效用户名（3–32 位）和密码（12–128 个字符）。'}, 422)
+        return JSONResponse({'error': '请输入有效用户名（3–32 位）和密码（12–24 个字符）。'}, 422)
 
     def token(request):
         return request.cookies.get(COOKIE)

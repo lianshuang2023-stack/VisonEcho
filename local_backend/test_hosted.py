@@ -166,6 +166,26 @@ def test_trial_limits_cannot_be_bypassed_by_alternate_paid_routes(server):
     assert store.data['guest_paid_operations'] == 5
 
 
+@pytest.mark.parametrize('length', [11, 25])
+@pytest.mark.parametrize('endpoint', ['register', 'login'])
+def test_password_http_rejects_out_of_range_without_echoing_password(server, length, endpoint):
+    _, client, _ = server
+    password = 'x' * length
+    response = post(client, '/api/access/' + endpoint, {'username': 'owner', 'password': password})
+    assert response.status_code == 422
+    assert '12–24' in response.json()['error']
+    assert password not in response.text
+
+
+@pytest.mark.parametrize('length', [12, 24])
+def test_password_http_accepts_both_limits(server, length):
+    _, client, _ = server
+    credentials = {'username': 'owner', 'password': 'x' * length}
+    assert post(client, '/api/access/register', credentials).status_code == 200
+    assert post(client, '/api/access/logout').status_code == 200
+    assert post(client, '/api/access/login', credentials).status_code == 200
+
+
 def test_guest_upload_reservations_and_tokens_are_workspace_scoped(server):
     app, client, _ = server
     post(client, '/api/access/guest')
