@@ -131,6 +131,8 @@ def test_guest_registration_keeps_trial_data_but_never_opens_local_cases(server)
 
 def test_cookies_csrf_private_cache_and_bad_credentials(server):
     _, client, _ = server
+    assert client.get('/healthz').json() == {'status': 'ok', 'mode': 'hosted'}
+    assert client.get('/api/projects').status_code == 401
     assert client.post('/api/access/guest', json={}).status_code == 403
     assert client.post('/api/access/guest', json={}, headers={'Origin': 'https://unrelated.invalid'}).status_code == 403
     response = post(client, '/api/access/guest')

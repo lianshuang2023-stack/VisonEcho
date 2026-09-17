@@ -38,3 +38,13 @@
 **/*.jpeg
 **/*.png
 **/homeTranslations.json
+
+# Runtime images contain application code only, not local validation scripts or
+# embedded test transcripts/media. Frontend tests remain in the build stage
+# because the TypeScript project includes them; only dist reaches the runtime.
+local_backend/test_*.py
+local_backend/check_*.py
+**/.hosted-data/**
+**/*.sqlite
+**/*.sqlite3
+**/*.db

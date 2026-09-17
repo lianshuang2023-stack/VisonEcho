@@ -206,6 +206,11 @@ def create_hosted_app(settings):
             response.delete_cookie(COOKIE, path='/', secure=parsed.scheme == 'https', httponly=True, samesite='lax')
         return response
 
+    @app.get('/healthz')
+    def healthcheck():
+        # Host/process liveness only; no account data, keys or paid cloud probes.
+        return {'status': 'ok', 'mode': 'hosted'}
+
     @app.post('/api/access/guest')
     def guest(request: Request):
         return authenticated(registry.auth.start_guest(token(request), remote=request.client.host if request.client else ''))

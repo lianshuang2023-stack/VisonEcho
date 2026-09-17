@@ -1,0 +1,55 @@
+name: Container validation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux-container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Linux image without credentials or private data
+        run: docker build --platform linux/amd64 -t visionecho:test .
+      - name: Verify FFmpeg and hosted session isolation
+        run: |
+          docker run --rm visionecho:test ffmpeg -version
+          docker run --rm visionecho:test ffprobe -version
+          docker run -d --name visionecho-test -p 8000:8000 \
+            -e PUBLIC_ORIGIN=http://127.0.0.1:8000 visionecho:test
+          trap 'docker logs visionecho-test; docker rm -f visionecho-test' EXIT
+          python - <<'PY'
+          import http.cookiejar, json, time, urllib.error, urllib.request
+          base = 'http://127.0.0.1:8000'
+          for attempt in range(30):
+              try:
+                  with urllib.request.urlopen(base + '/healthz', timeout=2) as response:
+                      assert json.load(response)['mode'] == 'hosted'
+                  break
+              except OSError:
+                  time.sleep(1)
+          else:
+              raise SystemExit('Hosted container did not start')
+          try:
+              urllib.request.urlopen(base + '/api/projects')
+          except urllib.error.HTTPError as error:
+              assert error.code == 401
+          else:
+              raise AssertionError('Private API was not protected')
+          ids = []
+          for _ in range(2):
+              client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+              request = urllib.request.Request(base + '/api/access/guest', data=b'{}', headers={'Origin':base,'Content-Type':'application/json'})
+              with client.open(request) as response:
+                  session = json.load(response)
+                  assert session['user']['kind'] == 'guest'
+                  assert session['limits']['max_upload_mb'] == 1024
+                  assert session['limits']['guest_generations_remaining'] == 5
+                  ids.append(session['user']['id'])
+              with client.open(base + '/api/projects') as response:
+                  assert json.load(response)['projects'] == []
+          assert ids[0] != ids[1]
+          with urllib.request.urlopen(base) as response:
+              assert b'VisionEcho' in response.read()
+          print('Linux container and isolated guest sessions passed')
+          PY
