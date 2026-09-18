@@ -1,0 +1,11 @@
+# Credential-free ngrok Agent v3 configuration, mounted read-only by Compose.
+# NGROK_AUTHTOKEN is supplied only through the agent container environment.
+version: 3
+agent:
+  web_addr: false
+  log: stdout
+  log_format: json
+  log_level: warn
+  update_check: false
+# Endpoint URL and upstream are supplied by compose.ngrok.yml.
+# The CLI --inspect=false flag disables HTTP request inspection.

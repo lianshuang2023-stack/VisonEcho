@@ -1,0 +1,88 @@
+# Standalone alternative to compose.yml; do not combine the two files.
+name: visionecho
+
+services:
+  app:
+    image: ${VISIONECHO_IMAGE:-visionecho:local}
+    platform: linux/amd64
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    user: "10001:10001"
+    # Deliberate allowlist: the app never receives NGROK_AUTHTOKEN.
+    environment:
+      ACCESS_MODE: hosted
+      PUBLIC_ORIGIN: https://${NGROK_DOMAIN:?Set the assigned ngrok hostname in deploy/server.env}
+      HOSTED_DATA_DIR: /data
+      LOCAL_DATA_DIR: /app/.local-data
+      MAX_UPLOAD_MB: "1024"
+      MAX_VIDEO_SECONDS: ${MAX_VIDEO_SECONDS:-600}
+      FORWARDED_ALLOW_IPS: ${NGROK_PRIVATE_IP:-172.30.89.2}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:?Set AZURE_OPENAI_ENDPOINT}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:?Set AZURE_OPENAI_API_KEY}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-gpt-5.6-terra}
+      AZURE_SPEECH_KEY: ${AZURE_SPEECH_KEY:-}
+      AZURE_SPEECH_ENDPOINT: ${AZURE_SPEECH_ENDPOINT:-}
+      AZURE_SPEECH_REGION: ${AZURE_SPEECH_REGION:-}
+      SPEECH_LANGUAGE: ${SPEECH_LANGUAGE:-zh-CN}
+      DIALOGUE_LANGUAGE: ${DIALOGUE_LANGUAGE:-auto}
+      AZURE_SPEECH_VOICE: ${AZURE_SPEECH_VOICE:-zh-CN-XiaoxiaoNeural}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - app-data:/data
+    networks:
+      - web
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  ngrok:
+    image: ${NGROK_IMAGE:-ngrok/ngrok:latest}
+    platform: linux/amd64
+    restart: unless-stopped
+    init: true
+    depends_on:
+      app:
+        condition: service_healthy
+    # Only the agent receives its token; Azure keys are not passed here.
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:?Set NGROK_AUTHTOKEN in deploy/server.env}
+    command:
+      - http
+      - http://app:8000
+      - --url=https://${NGROK_DOMAIN:?Set the assigned ngrok hostname in deploy/server.env}
+      - --config=/etc/ngrok.yml
+      - --inspect=false
+    volumes:
+      - ./ngrok.yml.example:/etc/ngrok.yml:ro
+    networks:
+      web:
+        ipv4_address: ${NGROK_PRIVATE_IP:-172.30.89.2}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  web:
+    ipam:
+      config:
+        - subnet: ${NGROK_SUBNET:-172.30.89.0/24}
+
+volumes:
+  app-data:

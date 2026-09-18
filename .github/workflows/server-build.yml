@@ -1,0 +1,281 @@
+name: Public server image bundle
+
+# No dispatch inputs, credentials, user media, registry pushes or tunnel startup.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-server-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux-amd64:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the selected public commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prepare a clean source snapshot
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          source_dir="$RUNNER_TEMP/visionecho-public-source"
+          mkdir -p "$source_dir"
+          git archive "$GITHUB_SHA" | tar -x -C "$source_dir"
+          # Check tracked source too; ignored local files never enter git archive.
+          python - "$source_dir" <<'PY'
+          from pathlib import Path
+          import sys
+          root = Path(sys.argv[1])
+          forbidden_dirs = {'.git', '.local-data', '.hosted-data', '.venv', 'node_modules', '__pycache__'}
+          forbidden_files = {'server.env', '.env', '.env.local', 'ngrok.yml', 'ngrok.yaml'}
+          media_suffixes = {'.mp4', '.mov', '.mkv', '.wav', '.mp3', '.jpg', '.jpeg', '.png', '.webp', '.vtt', '.srt'}
+          demo_root = Path('dashboard/frontend/public/assets/landing')
+          demo_names = {'lake.webp', 'frame-0.webp', 'frame-4.webp', 'frame-8.webp',
+                        'sample-original.mp4', 'sample-en.mp4', 'sample-zh.mp4', 'sample-en.vtt', 'sample-zh.vtt'}
+          for path in root.rglob('*'):
+              relative = path.relative_to(root)
+              if path.is_symlink():
+                  raise SystemExit(f'Symlinks are not accepted in this public build: {relative}')
+              if any(part in forbidden_dirs for part in relative.parts):
+                  raise SystemExit(f'Unexpected private/runtime directory: {relative}')
+              if path.is_file() and (path.name in forbidden_files or path.suffix in {'.db', '.sqlite', '.sqlite3', '.pem', '.key'}):
+                  raise SystemExit(f'Unexpected runtime/configuration file: {relative}')
+              if path.is_file() and path.name.startswith('.env') and not path.name.endswith('.example'):
+                  raise SystemExit(f'Only credential-free environment examples are accepted: {relative}')
+              if path.is_file() and path.suffix.lower() in media_suffixes:
+                  if relative.parent != demo_root or path.name not in demo_names:
+                      raise SystemExit(f'Media outside the public demo allowlist: {relative}')
+          required = ['Dockerfile', '.dockerignore', 'deploy/compose.ngrok.yml',
+                      'deploy/ngrok.yml.example', 'deploy/server.env.example',
+                      'deploy/README.ngrok.md', 'deploy/README.ngrok.zh-CN.md']
+          for name in required:
+              assert (root / name).is_file(), f'Missing deployment source: {name}'
+          PY
+          printf 'SOURCE_DIR=%s\n' "$source_dir" >> "$GITHUB_ENV"
+
+      - name: Build the selected app commit and obtain official ngrok
+        run: |
+          set -euo pipefail
+          docker build --pull --platform linux/amd64 \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            -t visionecho:local -t "visionecho:$GITHUB_SHA" "$SOURCE_DIR"
+          docker pull --platform linux/amd64 ngrok/ngrok:latest
+          test "$(docker image inspect visionecho:local --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
+          test "$(docker image inspect ngrok/ngrok:latest --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
+
+      - name: Verify hosted isolation and English landing assets without network access
+        run: |
+          set -euo pipefail
+          docker run --rm --network none visionecho:local ffmpeg -version
+          docker run --rm --network none visionecho:local ffprobe -version
+          docker run -d --name visionecho-public-test --network none \
+            --tmpfs /data:rw,nosuid,nodev,noexec,size=128m,uid=10001,gid=10001,mode=0700 \
+            -e ACCESS_MODE=hosted -e PUBLIC_ORIGIN=http://127.0.0.1:8000 \
+            visionecho:local
+          trap 'docker logs --tail=80 visionecho-public-test; docker rm -f -v visionecho-public-test' EXIT
+          docker exec -i visionecho-public-test python - <<'PY'
+          import http.cookiejar
+          from html.parser import HTMLParser
+          import json
+          import time
+          import urllib.error
+          import urllib.request
+
+          base = 'http://127.0.0.1:8000'
+          anonymous = urllib.request.build_opener()
+
+          def request(client, path, payload=None, method=None):
+              headers = {'Accept': 'application/json'}
+              data = None
+              if payload is not None:
+                  data = json.dumps(payload).encode()
+                  headers.update({'Origin': base, 'Content-Type': 'application/json'})
+              return client.open(urllib.request.Request(base + path, data=data, headers=headers, method=method), timeout=10)
+
+          def read_json(client, path, payload=None, method=None):
+              with request(client, path, payload, method) as response:
+                  return json.load(response)
+
+          def expect_status(client, path, status, payload=None, method=None):
+              try:
+                  with request(client, path, payload, method) as response:
+                      actual = response.status
+              except urllib.error.HTTPError as error:
+                  actual = error.code
+                  error.close()
+              assert actual == status, f'{method or "GET"} {path}: expected {status}, got {actual}'
+
+          for attempt in range(45):
+              try:
+                  health = read_json(anonymous, '/healthz')
+                  assert health == {'status': 'ok', 'mode': 'hosted'}
+                  break
+              except (OSError, AssertionError):
+                  time.sleep(1)
+          else:
+              raise SystemExit('Hosted container did not become healthy')
+
+          for path in ('/api/projects', '/api/collections'):
+              expect_status(anonymous, path, 401)
+          guests, identities, collections = [], [], []
+          for index in range(2):
+              client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+              session = read_json(client, '/api/access/guest', {})
+              assert session['mode'] == 'hosted' and session['user']['kind'] == 'guest'
+              assert session['limits']['max_upload_mb'] == 1024
+              assert session['limits']['guest_generations_remaining'] == 5
+              assert read_json(client, '/api/projects')['projects'] == []
+              identities.append(session['user']['id'])
+              collections.append(read_json(client, '/api/collections', {'title': f'CI synthetic collection {index}'})['id'])
+              guests.append(client)
+          assert identities[0] != identities[1]
+          for index, client in enumerate(guests):
+              rows = read_json(client, '/api/collections')['collections']
+              ids = {row['id'] for row in rows}
+              assert collections[index] in ids and collections[1-index] not in ids
+              expect_status(client, '/api/collections/' + collections[1-index], 404,
+                            {'title': 'Cross-workspace modification must fail'}, 'PATCH')
+          assert read_json(anonymous, '/api/access/session')['user'] is None
+
+          class Page(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.language = None
+                  self.scripts = []
+                  self.styles = []
+              def handle_starttag(self, tag, attrs):
+                  attrs = dict(attrs)
+                  if tag == 'html':
+                      self.language = attrs.get('lang')
+                  if tag == 'script' and attrs.get('src'):
+                      self.scripts.append(attrs['src'])
+                  if tag == 'link' and attrs.get('rel') == 'stylesheet':
+                      self.styles.append(attrs['href'])
+
+          with urllib.request.urlopen(base + '/', timeout=10) as response:
+              html = response.read().decode()
+          page = Page()
+          page.feed(html)
+          assert page.language == 'en'
+          assert 'VisionEcho' in html and 'Audio Description Studio' in html
+          assert page.scripts and page.styles
+          scripts = []
+          for path in page.scripts + page.styles:
+              assert path.startswith('/assets/'), f'Unexpected frontend asset URL: {path}'
+              with urllib.request.urlopen(base + path, timeout=10) as response:
+                  body = response.read()
+              assert body, f'Empty frontend asset: {path}'
+              if path in page.scripts:
+                  scripts.append(body.decode())
+          bundle = '\n'.join(scripts)
+          for phrase in ('Let the story', 'be heard.', 'Try as a guest', 'Hear the difference'):
+              assert phrase in bundle, f'English introduction missing: {phrase}'
+
+          media_root = '/assets/landing/'
+          for name in ('sample-original.mp4', 'sample-en.mp4', 'sample-zh.mp4'):
+              with urllib.request.urlopen(base + media_root + name, timeout=10) as response:
+                  assert response.headers.get_content_type() == 'video/mp4'
+                  assert b'ftyp' in response.read(32), f'Invalid sample MP4: {name}'
+          for name in ('lake.webp', 'frame-0.webp', 'frame-4.webp', 'frame-8.webp'):
+              with urllib.request.urlopen(base + media_root + name, timeout=10) as response:
+                  header = response.read(12)
+                  assert header[:4] == b'RIFF' and header[8:] == b'WEBP', f'Invalid sample image: {name}'
+          with urllib.request.urlopen(base + media_root + 'sample-en.vtt', timeout=10) as response:
+              captions = response.read().decode()
+          assert captions.startswith('WEBVTT') and 'A wooden boat' in captions
+          with urllib.request.urlopen(base + media_root + 'SOURCE.md', timeout=10) as response:
+              source = response.read().decode()
+          assert 'not a customer case' in source and 'unsplash.com/license' in source
+          print('Passed: health, anonymous 401, two isolated guests, English introduction and public sample assets.')
+          PY
+
+      - name: Validate ngrok Compose with placeholders and check configuration offline
+        env:
+          NGROK_DOMAIN: deployment-check.example.invalid
+          NGROK_AUTHTOKEN: non-secret-ci-placeholder
+          NGROK_IMAGE: ngrok/ngrok:latest
+          VISIONECHO_IMAGE: visionecho:local
+          AZURE_OPENAI_ENDPOINT: https://deployment-check.example.invalid/openai/v1
+          AZURE_OPENAI_API_KEY: non-secret-ci-placeholder
+          AZURE_SPEECH_KEY: non-secret-ci-placeholder
+          AZURE_SPEECH_REGION: eastus
+        run: |
+          set -euo pipefail
+          # Never print expanded Compose configuration or start the ngrok service.
+          docker compose --env-file /dev/null -f "$SOURCE_DIR/deploy/compose.ngrok.yml" config --quiet
+          docker run --rm --network none \
+            --mount "type=bind,src=$SOURCE_DIR/deploy/ngrok.yml.example,dst=/etc/ngrok.yml,readonly" \
+            ngrok/ngrok:latest config check --config /etc/ngrok.yml
+
+      - name: Package only images and credential-free deployment files
+        run: |
+          set -euo pipefail
+          bundle_dir="$RUNNER_TEMP/visionecho-server-bundle"
+          mkdir -p "$bundle_dir/deploy"
+          docker image inspect visionecho:local ngrok/ngrok:latest \
+            --format '{{.RepoTags}} {{.Os}}/{{.Architecture}} {{.Id}} {{json .RepoDigests}}' > "$bundle_dir/images.txt"
+          docker save visionecho:local "visionecho:$GITHUB_SHA" ngrok/ngrok:latest | gzip -1 > "$bundle_dir/images.tar.gz"
+          cp "$SOURCE_DIR/deploy/compose.ngrok.yml" "$SOURCE_DIR/deploy/ngrok.yml.example" \
+            "$SOURCE_DIR/deploy/server.env.example" "$SOURCE_DIR/deploy/README.ngrok.md" \
+            "$SOURCE_DIR/deploy/README.ngrok.zh-CN.md" "$bundle_dir/deploy/"
+          cp "$SOURCE_DIR/LICENSE" "$SOURCE_DIR/NOTICE" "$SOURCE_DIR/DEPLOYMENT-PRIVACY.md" \
+            "$SOURCE_DIR/DEPLOYMENT-PRIVACY.zh-CN.md" "$bundle_dir/"
+          printf '%s\n' "Source repository: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            "Source commit: $GITHUB_SHA" "Actions run: $GITHUB_RUN_ID" "Run attempt: $GITHUB_RUN_ATTEMPT" \
+            'Platform: linux/amd64' 'No deployment credentials or user workspaces are included.' > "$bundle_dir/build-info.txt"
+          printf '%s\n' \
+            'Verify: sha256sum --check SHA256SUMS' \
+            'Load: docker load --input images.tar.gz' \
+            'Create deploy/server.env from deploy/server.env.example on the server and chmod 600.' \
+            'Add real Azure settings, your assigned NGROK_DOMAIN and NGROK_AUTHTOKEN only on the server.' \
+            'Validate: docker compose --env-file deploy/server.env -f deploy/compose.ngrok.yml config --quiet' \
+            'Start the app: docker compose --env-file deploy/server.env -f deploy/compose.ngrok.yml up -d --no-build --pull never app' \
+            'Check app health and stop any old agent using the same domain before starting the public endpoint.' \
+            'Start ngrok: docker compose --env-file deploy/server.env -f deploy/compose.ngrok.yml up -d --no-build --pull never ngrok' \
+            'Do not remove the app-data volume. The bundle has no existing accounts, uploads or generated videos.' > "$bundle_dir/LOAD.txt"
+          python - "$bundle_dir" <<'PY'
+          from pathlib import Path
+          import hashlib
+          import sys
+          root = Path(sys.argv[1])
+          expected = {'images.tar.gz', 'images.txt', 'build-info.txt', 'LOAD.txt', 'LICENSE', 'NOTICE',
+                      'DEPLOYMENT-PRIVACY.md', 'DEPLOYMENT-PRIVACY.zh-CN.md',
+                      'deploy/compose.ngrok.yml', 'deploy/ngrok.yml.example', 'deploy/server.env.example',
+                      'deploy/README.ngrok.md', 'deploy/README.ngrok.zh-CN.md'}
+          actual = {path.relative_to(root).as_posix() for path in root.rglob('*') if path.is_file()}
+          assert actual == expected, f'Unexpected bundle files: {actual ^ expected}'
+          sums = []
+          for name in sorted(expected):
+              digest = hashlib.sha256()
+              with (root / name).open('rb') as stream:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                      digest.update(chunk)
+              sums.append(f'{digest.hexdigest()}  {name}')
+          (root / 'SHA256SUMS').write_text('\n'.join(sums) + '\n')
+          PY
+          (cd "$bundle_dir" && sha256sum --check SHA256SUMS)
+          printf 'BUNDLE_DIR=%s\n' "$bundle_dir" >> "$GITHUB_ENV"
+
+      - name: Retain the public-source deployment artifact for one day
+        uses: actions/upload-artifact@v4
+        with:
+          name: visionecho-server-linux-amd64-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ env.BUNDLE_DIR }}/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
