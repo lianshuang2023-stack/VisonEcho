@@ -1,0 +1,36 @@
+.lp-impact { padding-block:28px 76px; scroll-margin-top:28px; }
+.lp-impact-purpose { display:grid; grid-template-columns:.92fr 1.16fr; gap:54px; border-top:1px solid var(--lp-line); padding-top:52px; align-items:start; }
+.lp-impact-purpose .lp-eyebrow { margin-bottom:20px!important; }
+.lp-impact-purpose h2 { max-width:400px; }
+.lp-impact-belief { padding-top:3px; }
+.lp-impact-belief>svg { display:block; color:var(--lp-accent); margin-bottom:20px; }
+.lp-impact-belief>p { max-width:510px; color:var(--lp-text); font-size:16px; line-height:1.85; letter-spacing:-.01em; }
+.lp-impact-belief>span { display:block; max-width:430px; margin-top:18px; color:var(--lp-muted); font-size:12px; line-height:1.75; }
+.lp-impact-value-heading { margin-top:44px; }
+.lp-impact-value-heading .lp-impact-label { margin-bottom:10px!important; }
+.ve-landing .lp-impact-value-heading h3 { font-size:25px; font-weight:500; letter-spacing:-.035em; }
+.lp-impact-usecases { margin-top:22px; padding:32px; display:grid; grid-template-columns:minmax(180px,.56fr) minmax(0,1.44fr); gap:40px; background:var(--lp-panel); border:1px solid var(--lp-line); border-radius:12px; }
+.lp-impact-label { color:var(--lp-muted); font-size:10px; letter-spacing:.12em; font-weight:600; margin:1px 0 19px!important; }
+.lp-impact-selector [role=group] { display:grid; gap:7px; }
+.lp-impact-selector button { display:flex; align-items:center; gap:10px; width:100%; padding:13px 12px; border:1px solid transparent; border-radius:8px; color:var(--lp-muted); background:transparent; text-align:left; font-size:13px; line-height:1.4; }
+.lp-impact-selector button>span { flex:1; }
+.lp-impact-selector button>svg { flex-shrink:0; }
+.lp-impact-selector button>svg:last-child { opacity:0; }
+.lp-impact-selector button:hover { color:var(--lp-text); border-color:var(--lp-line); }
+.lp-impact-selector button[aria-pressed=true] { color:var(--lp-on-accent); background:var(--lp-accent); border-color:var(--lp-accent); }
+.lp-impact-selector button[aria-pressed=true]>svg:last-child { opacity:1; }
+.lp-impact-scenario { min-width:0; padding-left:32px; border-left:1px solid var(--lp-line); }
+.lp-impact-context { color:var(--lp-muted); font-size:11px; margin-bottom:14px!important; }
+.ve-landing .lp-impact-scenario h3 { max-width:520px; font-size:25px; line-height:1.3; font-weight:500; letter-spacing:-.035em; }
+.lp-impact-scenario dl { margin:24px 0 0; display:grid; gap:16px; }
+.lp-impact-scenario dl>div { display:grid; grid-template-columns:90px 1fr; gap:18px; }
+.lp-impact-scenario dt { color:var(--lp-accent); font-size:11px; padding-top:2px; font-weight:550; }
+.lp-impact-scenario dd { margin:0; font-size:13px; color:var(--lp-muted); line-height:1.75; }
+.lp-impact-deliverables { margin-top:24px; padding-top:18px; border-top:1px solid var(--lp-line); }
+.lp-impact-deliverables>span { display:block; color:var(--lp-muted); font-size:9px; letter-spacing:.08em; }
+.lp-impact-deliverables ul { display:flex; flex-wrap:wrap; list-style:none; gap:8px 18px; margin:8px 0 0; padding:0; color:var(--lp-text); font-size:12px; }
+.lp-impact-deliverables li+li { position:relative; }
+.lp-impact-deliverables li+li::before { content:'/'; color:var(--lp-muted); position:absolute; left:-11px; }
+@media(max-width:1100px) { .lp-impact-purpose { gap:32px; } .lp-impact-usecases { padding:28px; gap:25px; grid-template-columns:minmax(170px,.6fr) minmax(0,1.4fr); } .lp-impact-scenario { padding-left:25px; } .lp-impact-scenario dl>div { grid-template-columns:1fr; gap:5px; } }
+@media(max-width:767px) { .lp-impact { padding-block:0 46px; } .lp-impact-purpose { grid-template-columns:1fr; gap:27px; padding-top:34px; } .lp-impact-belief>svg { margin-bottom:13px; } .lp-impact-belief>p { font-size:15px; } .lp-impact-belief>span { margin-top:12px; } .lp-impact-usecases { grid-template-columns:1fr; gap:23px; margin-top:30px; padding:22px; } .lp-impact-selector [role=group] { grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; } .lp-impact-selector button { display:flex; flex-direction:column; align-items:flex-start; gap:8px; padding:11px 8px; font-size:11px; } .lp-impact-selector button>svg:last-child { display:none; } .lp-impact-label { margin-bottom:12px!important; } .lp-impact-scenario { padding:23px 0 0; border-left:0; border-top:1px solid var(--lp-line); } .ve-landing .lp-impact-scenario h3 { font-size:24px; } .lp-impact-scenario dl { margin-top:18px; } }
+@media(max-width:389px) { .lp-impact-usecases { padding:18px; } .lp-impact-selector button { padding:10px 6px; font-size:10px; overflow-wrap:anywhere; } .lp-impact-deliverables ul { gap:6px 15px; font-size:11px; } }

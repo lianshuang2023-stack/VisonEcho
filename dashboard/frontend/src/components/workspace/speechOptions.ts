@@ -27,6 +27,7 @@ export function languageLabel(language: VideoLanguage, uiLanguage: 'zh-CN' | 'en
 
 export function dialogueLanguageLabel(language: DialogueLanguage, uiLanguage: 'zh-CN' | 'en' = 'zh-CN'): string {
   if (language === 'auto') return uiLanguage === 'en' ? 'Auto · Chinese / English' : '自动识别 · 中 / 英';
+  if (language === 'none') return uiLanguage === 'en' ? 'No dialogue · music / ambience' : '无对白 · 仅音乐 / 环境音';
   return languageLabel(language, uiLanguage);
 }
 

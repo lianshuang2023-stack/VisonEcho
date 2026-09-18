@@ -29,6 +29,9 @@ export function Modal({ title, children, onClose, busy = false }: { title: strin
     const first = ref.current?.querySelector<HTMLElement>('input:not([disabled]), select:not([disabled]), textarea:not([disabled])') ?? ref.current?.querySelector<HTMLElement>('button:not([disabled])');
     first?.focus();
     const keydown = (event: KeyboardEvent) => {
+      // A retained resource drawer can contain an unfinished card editor. Its
+      // hidden modal must not keep trapping keys in the main workspace.
+      if (!ref.current || ref.current.closest('[hidden], [inert]')) return;
       if (event.key === 'Escape' && !busyRef.current) closeRef.current();
       if (event.key !== 'Tab') return;
       const nodes = Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]') ?? []);

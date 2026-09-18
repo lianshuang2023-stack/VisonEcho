@@ -61,7 +61,8 @@ class FakeSDK:
                 else:
                     text = value.get("NBest", [{}])[0].get("Display", "")
                     self.recognizer.recognized.emit(SimpleNamespace(result=SimpleNamespace(
-                        reason=kind, json=json.dumps(value), text=text)))
+                        reason=kind, json=json.dumps(value), text=text,
+                        no_match_details=SimpleNamespace(reason=value.get('NoMatchReason')))))
             if self.finish:
                 self.recognizer.session_stopped.emit(None)
 
@@ -90,6 +91,12 @@ class ContinuousTests(unittest.TestCase):
     def recognize(self, sdk, progress=None):
         with patch("local_backend.transcription._load_sdk", return_value=sdk):
             return transcribe_audio(self.audio, self.settings, progress)
+
+    def write_pcm(self, value=1000, tail_value=None):
+        with wave.open(str(self.audio), 'wb') as audio:
+            audio.setnchannels(1); audio.setsampwidth(2); audio.setframerate(16000)
+            audio.writeframes(int(value).to_bytes(2, 'little', signed=True) * (16000 * 12 - 1))
+            audio.writeframes(int(value if tail_value is None else tail_value).to_bytes(2, 'little', signed=True))
 
     def test_chinese_fixture_keeps_actual_word_times_and_display_text(self):
         # Times match the observed nonsecret Chinese validation result shape.
@@ -164,12 +171,14 @@ class ContinuousTests(unittest.TestCase):
                     with self.assertRaisesRegex(TranscriptionError, 'without word timestamps'):
                         _parse_result(data, fallback, 12, 'en-US')
 
-    def test_malformed_response_and_unmatched_speech_are_not_empty_success(self):
+    def test_malformed_response_and_unmatched_audio_are_not_empty_success(self):
         for data in ({'NBest': []}, {'NBest': [{}]}, {'NBest': [{'Display': '', 'Words': {}}]}):
             with self.subTest(data=data), self.assertRaises(TranscriptionError):
                 _parse_result(data, '', 12, 'en-US')
-        with self.assertRaisesRegex(TranscriptionError, 'correct dialogue language'):
-            self.recognize(FakeSDK([('recognized', {'NBest': [{'Display': ''}]}), ('no-match', {})]))
+        self.write_pcm()
+        result = self.recognize(FakeSDK([('recognized', {'NBest': [{'Display': ''}]}), ('no-match', {})]))
+        self.assertEqual(result['dialogue_status'], 'unrecognized')
+        self.assertEqual(result['dialogue_reason'], 'speech_not_recognized')
 
     def test_invalid_or_out_of_audio_times_are_rejected(self):
         for words in [[("hello", -1, 1)], [("hello", 1, 1)], [("hello", 11, 14)],
@@ -199,10 +208,64 @@ class ContinuousTests(unittest.TestCase):
         self.assertEqual(result["text"], "")
 
     def test_only_no_match_does_not_become_dialogue_free_video(self):
+        self.write_pcm()
         sdk = FakeSDK([("no-match", {})])
-        with self.assertRaisesRegex(TranscriptionError, "correct dialogue language"):
-            self.recognize(sdk)
+        result = self.recognize(sdk)
+        self.assertEqual(result['dialogue_status'], 'unrecognized')
+        self.assertEqual(result['dialogue_reason'], 'speech_not_recognized')
+        self.assertTrue(result['quality']['review_required'])
+        self.assertFalse(result['quality']['timing_validated'])
+        self.assertEqual(result['language'], 'und')
+        self.assertEqual(result['words'], [])
         self.assertTrue(sdk.stopped)
+
+    def test_completed_no_match_with_digital_silence_returns_no_speech(self):
+        for value in (0, 2, -2):
+            with self.subTest(value=value):
+                self.write_pcm(value)
+                result = self.recognize(FakeSDK([('no-match', {'NoMatchReason':'InitialSilenceTimeout'})]))
+                self.assertEqual(result['dialogue_status'], 'no_speech')
+                self.assertEqual(result['dialogue_reason'], 'silent_audio')
+                self.assertFalse(result['quality']['review_required'])
+                self.assertFalse(result['quality']['timing_validated'])
+                self.assertEqual(result['quality']['no_match_reasons'], ['initial_silence_timeout'])
+                self.assertEqual(transcript_cues(result), [])
+
+    def test_initial_silence_timeout_does_not_assert_rest_of_audio_is_silent(self):
+        self.write_pcm(0, tail_value=3)
+        result = self.recognize(FakeSDK([('no-match', {'NoMatchReason':'InitialSilenceTimeout'})]))
+        self.assertEqual(result['dialogue_status'], 'unrecognized')
+        self.assertTrue(result['quality']['review_required'])
+
+    def test_nonzero_empty_success_and_no_events_are_unrecognized_not_no_speech(self):
+        self.write_pcm()
+        for events in ([], [('recognized', {'NBest':[{'Display':'','Lexical':'','Words':[]}]})]):
+            with self.subTest(events=events):
+                result = self.recognize(FakeSDK(events))
+                self.assertEqual(result['dialogue_status'], 'unrecognized')
+                self.assertEqual(result['language'], 'und')
+                self.assertTrue(result['quality']['review_required'])
+                self.assertEqual(result['words'], [])
+
+    def test_sdk_no_match_metadata_is_closed_and_cannot_expose_error_values(self):
+        self.write_pcm()
+        result = self.recognize(FakeSDK([('no-match', {'NoMatchReason':'test-speech-secret'})]))
+        self.assertEqual(result['quality']['no_match_reasons'], ['unknown'])
+        self.assertNotIn('test-speech-secret', json.dumps(result))
+
+    def test_no_match_then_recognized_words_keeps_recognition_and_review_warning(self):
+        result = self.recognize(FakeSDK([('no-match', {}),
+            ('recognized', hypothesis('Welcome.', [('welcome', 1, 2)]))]))
+        self.assertEqual(result['dialogue_status'], 'recognized')
+        self.assertEqual(result['text'], 'Welcome.')
+        self.assertTrue(result['quality']['timing_validated'])
+        self.assertTrue(result['quality']['review_required'])
+
+    def test_silent_audio_does_not_convert_cancellation_or_network_timeout_to_success(self):
+        for events in [[('no-match', {}), ('canceled', SimpleNamespace(reason='error', error_details='network failure'))],
+                       [('canceled', SimpleNamespace(reason='error', error_details='invalid test-speech-secret'))]]:
+            with self.subTest(events=events), self.assertRaises(TranscriptionError):
+                self.recognize(FakeSDK(events))
 
     def test_unfinished_session_times_out_and_stops(self):
         sdk = FakeSDK([], finish=False)
@@ -291,9 +354,9 @@ class CueTests(unittest.TestCase):
         return {"language": language, "phrases": [{"text": display, "start": words[0]["start"],
             "end": words[-1]["end"]}], "words": words}
 
-    def test_short_phrase_preserves_display_punctuation(self):
+    def test_short_phrase_omits_subtitle_punctuation(self):
         transcript = {"language": "zh-CN", "phrases": [{"text": "欢迎。", "start": 1.15, "end": 1.79}], "words": []}
-        self.assertEqual(transcript_cues(transcript), [{"id": "cue-0001", "text": "欢迎。", "start": 1.15, "end": 1.79}])
+        self.assertEqual(transcript_cues(transcript), [{"id": "cue-0001", "text": "欢迎", "start": 1.15, "end": 1.79}])
 
     def test_long_chinese_phrase_splits_at_real_pauses_without_spaces(self):
         transcript = {"language": "zh-CN", "phrases": [{"text": "欢迎开始", "start": 1, "end": 10}],
@@ -308,7 +371,7 @@ class CueTests(unittest.TestCase):
             "words": [{"text": text, "start": start, "end": start + 2}
                       for text, start in [("One", 0), ("two", 2), ("three", 4), ("four.", 6)]]}
         cues = transcript_cues(transcript, max_seconds=5)
-        self.assertEqual([cue["text"] for cue in cues], ["One two", "three four."])
+        self.assertEqual([cue["text"] for cue in cues], ["One two", "three four"])
         self.assertEqual([(cue["start"], cue["end"]) for cue in cues], [(0, 4), (4, 8)])
 
     def test_long_phrase_without_words_is_not_guessed(self):
@@ -323,7 +386,7 @@ class CueTests(unittest.TestCase):
             ("then", 5, 6), ("wait", 6, 7), ("three", 7, 8), ("hundred", 8, 9),
             ("sixty", 9, 10), ("five", 10, 11), ("days", 11, 12)])
         cues = transcript_cues(transcript, max_seconds=5)
-        self.assertEqual([cue["text"] for cue in cues], ["Pay $200 today,", "then wait", "365 days."])
+        self.assertEqual([cue["text"] for cue in cues], ["Pay $200 today", "then wait", "365 days"])
         self.assertEqual([(cue["start"], cue["end"]) for cue in cues], [(0, 5), (5, 7), (7, 12)])
 
     def test_long_english_in_chinese_locale_keeps_original_spaces(self):
@@ -331,25 +394,25 @@ class CueTests(unittest.TestCase):
         lexical = [(word, index, index + 1) for index, word in enumerate(
             ["welcome", "to", "the", "workshop", "we", "start", "today"])]
         cues = transcript_cues(self.transcript(display, lexical, "zh-CN"))
-        self.assertEqual([cue["text"] for cue in cues], ["Welcome to the workshop.", "We start today."])
+        self.assertEqual([cue["text"] for cue in cues], ["Welcome to the workshop", "We start today"])
 
-    def test_short_phrase_splits_measured_pause_without_losing_punctuation(self):
+    def test_short_phrase_splits_at_measured_pause_before_removing_punctuation(self):
         cues = transcript_cues(self.transcript("Ready, everyone? Begin now.", [("ready", 0, .5),
             ("everyone", .5, 1), ("begin", 3, 3.5), ("now", 3.5, 4)]))
-        self.assertEqual([cue["text"] for cue in cues], ["Ready, everyone?", "Begin now."])
+        self.assertEqual([cue["text"] for cue in cues], ["Ready everyone", "Begin now"])
         self.assertEqual([(cue["start"], cue["end"]) for cue in cues], [(0, 1), (3, 4)])
 
     def test_mixed_chinese_latin_display_is_preserved(self):
         cues = transcript_cues(self.transcript("欢迎来到 Vision Echo。Let's start!", [("欢", 0, .3),
             ("迎", .3, .6), ("来", .6, .9), ("到", .9, 1.2), ("vision", 1.2, 1.5),
             ("echo", 1.5, 2), ("let's", 3, 3.5), ("start", 3.5, 4)], "zh-CN"))
-        self.assertEqual([cue["text"] for cue in cues], ["欢迎来到 Vision Echo。", "Let's start!"])
+        self.assertEqual([cue["text"] for cue in cues], ["欢迎来到 Vision Echo", "Let's start"])
 
     def test_unalignable_normalized_span_preserves_all_display_without_fake_times(self):
         transcript = self.transcript("2026/09/17", [("september", 0, 2), ("seventeenth", 2, 4),
             ("twenty", 4, 5), ("twenty", 5, 6), ("six", 6, 7)])
         self.assertEqual(transcript_cues(transcript, max_seconds=3),
-            [{"id": "cue-0001", "text": "2026/09/17", "start": 0, "end": 7}])
+            [{"id": "cue-0001", "text": "2026 09 17", "start": 0, "end": 7}])
 
     def test_adjacent_cue_timing_does_not_have_floating_point_overlap(self):
         cues = transcript_cues(self.transcript("First. Second.", [("first", 4.94, 4.94 + .44),
@@ -360,10 +423,10 @@ class CueTests(unittest.TestCase):
         transcript = self.transcript("She says “Hello!” Then we're ready.", [("she", 0, 1),
             ("says", 1, 2), ("hello", 2, 3), ("then", 4, 5), ("we're", 5, 6), ("ready", 6, 7)])
         cues = transcript_cues(transcript)
-        self.assertEqual([cue["text"] for cue in cues], ["She says “Hello!”", "Then we're ready."])
+        self.assertEqual([cue["text"] for cue in cues], ["She says Hello", "Then we're ready"])
         transcript["phrases"][0]["text"] = 'She says "Hello!" Then we’re ready.'
         self.assertEqual([cue["text"] for cue in transcript_cues(transcript)],
-                         ['She says "Hello!"', 'Then we’re ready.'])
+                         ['She says Hello', 'Then we’re ready'])
 
 
 if __name__ == "__main__":

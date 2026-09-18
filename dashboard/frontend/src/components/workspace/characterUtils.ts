@@ -24,8 +24,11 @@ export function proposeCharacterRenames(previous: VideoCharacter, next: VideoCha
   if (!next.preferred_name.trim()) return [];
   const related = new Set([...previous.occurrences, ...next.occurrences].filter(item => item.job_id === jobId).map(item => item.segment_index));
   return segments.flatMap(segment => {
+    const sourceTime = segment.source_start ?? segment.start_time;
+    const name = sourceTime < (next.name_available_from ?? 0) ? (next.before_name?.trim() || next.appearance.trim()) : next.preferred_name.trim();
+    if (!name) return [];
     const linked = related.has(segment.segment_index) || Boolean(segment.character_ids?.includes(previous.id));
-    const after = replaceName(segment.dvi_text, [previous.preferred_name, ...previous.aliases, ...next.aliases], next.preferred_name.trim());
+    const after = replaceName(segment.dvi_text, [previous.preferred_name, previous.before_name ?? '', ...previous.aliases, ...next.aliases], name);
     return after === segment.dvi_text ? [] : [{ segmentIndex: segment.segment_index, before: segment.dvi_text, after, linked }];
   });
 }

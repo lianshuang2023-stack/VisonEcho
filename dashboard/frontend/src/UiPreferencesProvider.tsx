@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { UI_PREFERENCES_KEY, UiPreferencesContext } from './uiPreferences';
 import type { UiLanguage, UiTheme } from './uiPreferences';
+import { isOverviewHash } from './pageNavigation';
 
 function readPreferences(): { language: UiLanguage; theme: UiTheme } {
   try {
     const saved = JSON.parse(window.localStorage.getItem(UI_PREFERENCES_KEY) || '{}');
-    return { language: saved.language === 'en' ? 'en' : 'zh-CN', theme: saved.theme === 'dark' ? 'dark' : 'light' };
-  } catch { return { language: 'zh-CN', theme: 'light' }; }
+    // A fresh visit to the introduction always starts in English. Language
+    // switches still apply for the current visit; direct studio visits remember them.
+    return { language: !isOverviewHash(window.location.hash) && saved.language === 'zh-CN' ? 'zh-CN' : 'en', theme: saved.theme === 'dark' ? 'dark' : 'light' };
+  } catch { return { language: 'en', theme: 'light' }; }
 }
 
 export default function UiPreferencesProvider({ children }: { children: ReactNode }) {
@@ -24,5 +28,17 @@ export default function UiPreferencesProvider({ children }: { children: ReactNod
     try { window.localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify(preferences)); } catch { /* Preferences still work when storage is unavailable. */ }
   }, [preferences, language, theme]);
   const value = useMemo(() => ({ language, theme, setLanguage, setTheme, t }), [language, theme, setLanguage, setTheme, t]);
-  return <UiPreferencesContext.Provider value={value}>{children}</UiPreferencesContext.Provider>;
+  const fluentTheme = useMemo(() => ({ ...(theme === 'dark' ? webDarkTheme : webLightTheme),
+    colorBrandBackground: theme === 'dark' ? '#87c8b2' : '#29604a',
+    colorBrandBackgroundHover: theme === 'dark' ? '#a7dcc5' : '#214e3d',
+    colorBrandBackgroundPressed: theme === 'dark' ? '#b9e2d2' : '#193d2f',
+    colorNeutralForegroundOnBrand: theme === 'dark' ? '#11271b' : '#ffffff',
+    colorBrandForeground1: theme === 'dark' ? '#a7dcc5' : '#29604a',
+    colorBrandStroke1: theme === 'dark' ? '#87c8b2' : '#29604a',
+    colorCompoundBrandStroke: theme === 'dark' ? '#87c8b2' : '#29604a',
+    colorCompoundBrandForeground1: theme === 'dark' ? '#a7dcc5' : '#29604a',
+    colorCompoundBrandForeground1Hover: theme === 'dark' ? '#b9e2d2' : '#214e3d',
+    fontFamilyBase: '"Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif',
+  }), [theme]);
+  return <UiPreferencesContext.Provider value={value}><FluentProvider theme={fluentTheme} style={{ background: 'transparent', minHeight: '100dvh' }}>{children}</FluentProvider></UiPreferencesContext.Provider>;
 }

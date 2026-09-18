@@ -14,7 +14,7 @@ from .lifecycle import require_video
 
 
 class CalibrationRequest(BaseModel):
-    language: Literal['auto', 'en-US', 'zh-CN'] = 'auto'
+    language: Literal['auto', 'en-US', 'zh-CN', 'none'] = 'auto'
     revision: int = Field(ge=0, strict=True)
 
 
@@ -25,10 +25,15 @@ def _now():
 def calibrate_audio(input_path, output_dir, settings):
     from .pipeline import _run, probe_media
     from .transcription import CUE_FORMAT_VERSION, transcribe_audio, transcript_cues
+    if settings.dialogue_language == 'none':
+        return {'text': '', 'words': [], 'phrases': [], 'cues': [], 'language': 'none',
+                'dialogue_language': 'none', 'dialogue_status': 'no_speech',
+                'dialogue_reason': 'user_declared_no_dialogue', 'timing_source': 'user_declared_no_dialogue',
+                'cue_format_version': CUE_FORMAT_VERSION}
     media = probe_media(input_path, settings)
     if not media['has_audio']:
         return {'text': '', 'words': [], 'phrases': [], 'cues': [], 'language': settings.dialogue_language,
-                'timing_source': 'no_audio_track'}
+                'timing_source': 'no_audio_track', 'dialogue_status': 'no_speech', 'dialogue_reason': 'no_audio_track'}
     output_dir.mkdir(parents=True, exist_ok=True)
     audio = output_dir / 'dialogue.wav'
     _run([settings.ffmpeg_bin, '-v', 'error', '-nostdin', '-y', '-protocol_whitelist', 'file,pipe',
@@ -57,6 +62,9 @@ def register_calibration_routes(app, store, settings):
             task_dir = store.root / 'calibrations' / task_id
             transcript = calibrate_audio(store.root / 'input' / (job['video_id'] + '.mp4'),
                                          task_dir, replace(settings, dialogue_language=language))
+            if language != 'none' and (transcript.get('dialogue_status') == 'unrecognized' or
+                    (not transcript.get('cues') and transcript.get('dialogue_status') != 'no_speech')):
+                raise ValueError('未能可靠识别对白，已保留现有字幕；请检查原声或选择正确语言。确认仅音乐或无对白时，可明确选择“无对白”。')
             if job['result'].get('insertions'):
                 from .extended import shift_transcript
                 transcript = shift_transcript(transcript, job['result']['insertions'])
@@ -70,6 +78,9 @@ def register_calibration_routes(app, store, settings):
                     raise ValueError('校准期间字幕已被修改，已保留现有字幕；请重新校准。')
                 draft = {'cues': cues, 'revision': expected_revision + 1,
                          'language': transcript.get('language', language), 'dialogue_language': language}
+                for key in ('dialogue_status', 'dialogue_reason'):
+                    if key in transcript:
+                        draft[key] = transcript[key]
                 if _transcript_quality(transcript):
                     draft['quality'] = _transcript_quality(transcript)
                 directory = (store.root / 'runs' / job_id).resolve()
@@ -95,7 +106,7 @@ def register_calibration_routes(app, store, settings):
 
     @app.post('/api/videos/{job_id}/transcript/calibrate')
     def start(job_id: str, payload: CalibrationRequest, background: BackgroundTasks):
-        if not settings.azure_speech_key or not (settings.azure_speech_region or settings.azure_speech_endpoint):
+        if payload.language != 'none' and (not settings.azure_speech_key or not (settings.azure_speech_region or settings.azure_speech_endpoint)):
             raise HTTPException(503, '请先配置 Azure Speech 服务。')
         with store.lock:
             current = _transcript(store, job_id)

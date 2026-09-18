@@ -3,6 +3,7 @@ import type {
   CharacterDetection, CharacterLibrary, EvidenceFeedback, SegmentEvidence, DialogueLanguage, ExecutionStarted, NarrationEditor, NarrationMode, NarrationSegment,
   ProjectCollection, ProjectDetail, ProjectTrash, Transcript, TranscriptCalibration,
   VideoLanguage, VideoProject,
+  SegmentReviewState, StudioReviewDocument,
 } from './types';
 
 export type {
@@ -10,6 +11,7 @@ export type {
   DialogueLanguage, NarrationEditor, NarrationMode, NarrationSegment, ProjectCollection,
   ProjectDetail, ProjectExecution, ProjectStatus, ProjectTrash, TimelineInsertion,
   Transcript, TranscriptCalibration, TranscriptCue, VideoLanguage, VideoProject, WorkflowStatus,
+  SegmentReviewState, SegmentReview, StudioReviewDocument,
 } from './types';
 
 const pathId = encodeURIComponent;
@@ -128,6 +130,18 @@ export function outputUrl(jobId: string): string {
 
 export function getSegmentEvidence(jobId: string, segmentIndex: number): Promise<SegmentEvidence> {
   return requestJson(`${versionPath(jobId)}/segments/${segmentIndex}/evidence`);
+}
+
+export function getStudioReview(jobId: string): Promise<StudioReviewDocument> {
+  return requestJson(`${versionPath(jobId)}/review-state`);
+}
+
+export function updateStudioReview(jobId: string, review: StudioReviewDocument, changes: { segment_index: number; state: SegmentReviewState }[]): Promise<StudioReviewDocument> {
+  return requestJson(`${versionPath(jobId)}/review-state`, { method: 'PUT', body: JSON.stringify({ revision: review.revision, transcript_revision: review.transcript_revision, changes }) });
+}
+
+export function rewriteSegment(jobId: string, index: number, text: string, action: 'shorten' | 'objective' | 'atmosphere'): Promise<{ text: string }> {
+  return requestJson(`${versionPath(jobId)}/segments/${index}/rewrite`, { method: 'POST', body: JSON.stringify({ text, action }), signal: AbortSignal.timeout(90_000) });
 }
 
 export function saveEvidenceFeedback(jobId: string, segmentIndex: number, feedback: EvidenceFeedback): Promise<EvidenceFeedback> {

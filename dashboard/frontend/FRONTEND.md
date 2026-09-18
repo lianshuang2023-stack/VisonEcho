@@ -1,26 +1,34 @@
-# VisionEcho 前端开发说明
+# VisionEcho frontend development
 
-前端为 React 19 + TypeScript 单页应用，使用 Vite 8 构建。页面围绕作品管理、口述制作和字幕校对组织。
+[English](FRONTEND.md) | [简体中文](FRONTEND.zh-CN.md)
 
-## 页面与代码
+The frontend is a React 19 and TypeScript single-page application built with Vite 8. It uses Fluent UI components, Lucide icons, Tailwind CSS and application styles. It includes the product overview, workspace access, video library and production editor.
 
-| 文件 | 职责 |
+## Application structure
+
+| File or directory | Responsibility |
 |---|---|
-| `src/App.tsx` | VisionEcho 工作区入口 |
-| `src/components/LocalVideoWorkspace.tsx` | 我的作品、搜索筛选、项目管理、上传与回收站 |
-| `src/components/workspace/ProjectStudio.tsx` | 生成设置、历史版本、播放器、口述稿和字幕编辑 |
-| `src/components/workspace/ComparisonPreview.tsx` | 原声与口述版对比预览 |
-| `src/components/workspace/EvidencePanel.tsx` | 关键帧、原片跳转与版本纠错记录 |
-| `src/components/workspace/CharacterPanel.tsx` | 人物卡、称呼确认与稿件替换预览 |
-| `src/components/workspace/timeline.ts` | 原片与扩展口述的时间映射 |
-| `src/localWorkspaceApi.ts` | 作品、校准、配音与导出的类型和请求 |
-| `src/api.ts` | 上传、媒体地址、执行状态和后端配置请求 |
-| `src/UiPreferencesProvider.tsx` | 页面语言与主题状态 |
-| `src/workspace.css`、`src/ui-theme.css` | 工作区布局与亮暗主题 |
+| `src/main.tsx`, `src/App.tsx` | Mount React, UI preferences, the access gate and workspace. |
+| `src/components/AccessGate.tsx`, `src/accessSession.ts` | Load local or hosted sessions; provide guest access, account forms and session refresh in hosted mode. |
+| `src/pageNavigation.ts` | Coordinate overview sections and workspace navigation through URL hashes without a routing library. |
+| `src/components/LandingPage.tsx` | Product overview and the illustrative original/described sample. |
+| `src/components/LandingTimingDemo.tsx`, `LandingImpact.tsx`, `useLandingMotion.ts` | Timing explanation, accessibility content and overview animation, including reduced-motion handling. |
+| `src/components/LocalVideoWorkspace.tsx` | Video library, search and filters, project organization, uploads, settings and trash. |
+| `src/components/workspace/ProjectStudio.tsx` | Coordinate preparation, generation, review and export; manage player, version and editing state. |
+| `src/components/workspace/StudioProgress.tsx` | Generation steps and processing progress. |
+| `src/components/workspace/StudioReviewPanel.tsx`, `useStudioReview.ts` | Segment review states, risk filters, text edits and requested model rewrites. |
+| `src/components/workspace/EvidencePanel.tsx` | Reference frames, source-video jumps and saved visual correction feedback. |
+| `src/components/workspace/CharacterPanel.tsx`, `characterUtils.ts` | Character cards, detection results, name confirmation and replacement previews. |
+| `src/components/workspace/ComparisonPreview.tsx`, `timeline.ts` | Original/described comparison and source/output time mapping for extended narration. |
+| `src/components/workspace/subtitleDisplay.ts` | Subtitle validation, speaker labels and overlapping-cue display. |
+| `src/components/workspace/StudioQualityReport.tsx`, `StudioExportMenu.tsx` | Export view and format selection. Despite its filename, `StudioQualityReport` is an export panel, not an automated quality score. |
+| `src/api.ts`, `src/localWorkspaceApi.ts`, `src/types.ts` | Same-origin API transport, upload requests, typed workspace operations and data contracts. |
+| `src/UiPreferencesProvider.tsx`, `src/uiPreferences.ts` | Interface language, theme persistence and Fluent UI theme tokens. |
+| `src/workspace.css`, `src/ui-theme.css`, component CSS files | Workspace layout, light/dark themes and styles for the overview, access and editor modules. |
 
-## 本地运行
+## Local development
 
-从仓库根目录运行 `./run-local.sh` 可同时启动前后端。单独启动前端时，先保证 FastAPI 后端运行于 `127.0.0.1:8000`。
+Run `./run-local.sh` from the repository root to start both services. To run only the frontend, first start FastAPI on `127.0.0.1:8000`, then use:
 
 ```bash
 cd dashboard/frontend
@@ -28,29 +36,32 @@ npm ci
 npm run dev
 ```
 
-Vite 在开发和预览模式下将 `/api/*` 转发至本地后端，包含上传与视频请求。默认打开 VisionEcho 工作区，无需前端模式变量。
+Vite development and preview servers bind to `127.0.0.1:5174` and proxy `/api/*`, including uploads and media requests, to the backend. No frontend mode variable is required. The root URL opens the overview; `#visionecho-content` opens the workspace when the session permits access. See the [local setup guide](../../RUN-LOCAL.md).
 
-## 交互与数据
+## State and API contracts
 
-- 页面内保存当前作品与历史版本选择，后端维护作品和生成任务数据。
-- 新生成、重新配音均创建新版本；对白字幕保存使用修订号检查，防止覆盖其他窗口的修改。
-- 对白语言、解说语言和页面语言相互独立；换音色时保持当前版本的口述稿语言。
-- 扩展口述会增加成片时长。原片预览与口述版使用不同时间轴，字幕显示和跳转需使用时间映射。
-- 页面语言和主题保存在浏览器本地存储；视频、字幕及版本文件保存在后端工作区。
-- 字幕编辑影响预览与 SRT/VTT 下载，不会烧录进 MP4。
+- React state holds the selected video, version and unsaved edits. The backend stores projects, tasks, media, saved subtitles, evidence feedback, character cards and review records. Generation progress is polled from the backend.
+- Generation and revoicing create new versions. Subtitle and review updates carry revision numbers to reject stale writes. The UI asks before discarding unsaved edits.
+- Dialogue language, narration language and interface language are independent. Dialogue options are automatic detection, Chinese, English and no dialogue. Changing the voice preserves the current version's narration language.
+- Subtitle editing supports adding and deleting cues, changing text and times, and editing speaker labels. Overlap is valid only for different known speakers. Saved edits update previews and subtitle downloads; subtitles are not burned into the MP4.
+- Extended narration changes output duration. Playback, source-frame jumps and subtitle display must use the appropriate source or output time; keep conversions in `timeline.ts`.
+- Segment rewrites update the editing draft. Revoicing saves changed narration into a new video version. Review states organize corrections but do not block downloads.
+- The export menu downloads the saved MP4, dialogue SRT/VTT or voiced narration TXT. Unsaved changes are excluded.
+- UI language and theme use browser local storage. A fresh overview visit starts in English; a direct workspace visit restores the saved Chinese or English preference. Both restore the theme selection.
+- API requests use same-origin `/api` URLs. `api.ts` reports session expiry on HTTP 401 and does not automatically retry mutations. Hosted access uses a server session; deployment and workspace isolation belong to the backend.
 
-## 构建与测试
+## Build and verification
 
 ```bash
 npm run build
-./node_modules/.bin/vitest run
+npm test
 npm run lint
 ```
 
-生产构建输出到 `dist/`。本地静态服务需要把同源 `/api` 请求转发至 FastAPI，并保持仅监听本机。已知功能限制见[本地运行说明](../../RUN-LOCAL.zh-CN.md#当前已知限制)。
+The build runs TypeScript checks and writes static files to `dist/`. Vitest uses jsdom and Testing Library; tests live alongside components and under `src/__tests__/`. `npm run preview` previews the build and still requires the backend. A deployed static frontend also needs same-origin `/api` routing to the configured backend; see the [deployment guide](../../deploy/README.md).
 
-## 配置边界
+## Configuration and sample assets
 
-Azure API 密钥只放在仓库根目录的后端 `.env.local` 中。任何 `VITE_*` 变量都会进入前端构建，不可用于保存密钥。
+Azure credentials are read by the backend from the repository-root `.env.local` file or server environment. Never put credentials in frontend code or `VITE_*` variables; exposed Vite variables are bundled into the client. `GET /api/health` reports configuration, available languages and upload limits without testing a live Azure connection.
 
-`GET /api/health` 返回配置是否齐全、可用语言和上传限制；该请求不执行 Azure 连接测试。
+The overview media in `public/assets/landing/` is a prepared illustration, not an output from the Azure generation pipeline. Keep its source, license and production notes with the assets: [sample provenance](public/assets/landing/SOURCE.md).

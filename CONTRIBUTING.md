@@ -1,14 +1,17 @@
-# 参与 VisionEcho
+# Contributing to VisionEcho
 
-## 问题反馈
+**English** | [简体中文](CONTRIBUTING.zh-CN.md)
 
-请在本仓库提交问题，说明预期结果、实际结果、复现步骤以及操作系统和浏览器版本。附上可公开的最小测试素材；不要上传密钥、私人视频或完整本地工作区。
+## Reporting an issue
 
-## 代码修改
+Open an issue in this repository with the expected result, actual result, steps to reproduce, operating system and browser version. Include a minimal test sample that you have permission to share. Do not upload credentials, private videos or a complete local workspace.
 
-1. 从当前 main 分支创建工作分支。
-2. 保持修改聚焦，为行为变化补充合成素材或模拟服务测试。
-3. 在提交说明中写明变化、验证结果和已知限制。
+## Code changes
+
+1. Create a working branch from the current main branch.
+2. Keep changes focused. Cover behavior changes with synthetic media or mocked-service tests.
+3. Describe the change, validation results and known limitations in the commit or pull request.
+4. Update both English and Chinese documentation when a documented behavior changes.
 
 ```bash
 .venv/bin/python -m pytest local_backend -q
@@ -17,8 +20,8 @@ npm --prefix dashboard/frontend run lint
 npm --prefix dashboard/frontend test
 ```
 
-Azure 调用应由明确操作触发。测试默认使用模拟服务；实时验证需使用自己的资源并确认用量。
+Azure calls should follow explicit user actions. Tests use mocked services by default; live checks require your own resources and consume billable usage.
 
-## 协作
+## Collaboration
 
-遵守[协作约定](CODE_OF_CONDUCT.md)。发现可能暴露数据或凭据的问题时，通过已有的私密协作渠道联系仓库维护者，不在公开问题中发布敏感内容。许可证见 [LICENSE](LICENSE)。
+Follow the [code of conduct](CODE_OF_CONDUCT.md). Report possible exposure of data or credentials through an existing private channel to the maintainers; do not post sensitive details in public issues. See [LICENSE](LICENSE) for the license.

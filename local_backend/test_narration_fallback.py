@@ -104,7 +104,10 @@ def test_empty_speech_success_continues_to_visual_narration(continuous_video,tmp
     monkeypatch.setattr(pipeline,'_synthesize',synth)
     result=pipeline.process_video(source,tmp_path/'no-dialogue',settings,2,lambda *args:None)
     assert json.loads(Path(result['transcript_path']).read_text())['cues']==[]
-    assert result['narration_mode']=='standard'
+    assert result['dialogue_status']=='unrecognized'
+    assert result['dialogue_reason']=='speech_not_recognized'
+    assert result['narration_mode']=='extended'
+    assert result['insertions'][0]['source_time']==pytest.approx(6)
     assert result['outcome']=='audio_description'
     assert result['summary']['passed_segments']==1
     assert Path(result['output_path']).is_file()

@@ -43,6 +43,7 @@ class Settings:
     # Source recognition is independent of the generated narration language.
     dialogue_language: str = "auto"
     narration_mode: str = "auto"
+    narration_style: str = "concise"
     # Per-job snapshot of user-confirmed names; not loaded from environment.
     character_context: list[dict] = field(default_factory=list, repr=False)
     character_library: list[dict] = field(default_factory=list, repr=False)

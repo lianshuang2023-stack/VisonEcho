@@ -7,6 +7,7 @@ import math
 import re
 import subprocess
 import time
+import unicodedata
 import wave
 from pathlib import Path
 from typing import Any, Callable
@@ -18,6 +19,15 @@ import httpx
 
 class PipelineError(ValueError):
     """An actionable error safe to display without request headers."""
+
+
+class DescriptionWindowTooShort(PipelineError):
+    """Validated text exceeds its window after the bounded shortening attempt."""
+
+    def __init__(self, description: str, usage: dict[str, Any]):
+        super().__init__('The visual description is too long for its narration window. Try extended narration mode.')
+        self.description = description
+        self.usage = dict(usage)
 
 
 MAX_AUDIO_SPEED = 1.35
@@ -273,9 +283,68 @@ def _fictional_role_context(candidates: list[dict]) -> list[dict]:
             continue
         roles.append({'name': recognition['name'], 'visual_evidence': recognition['evidence'],
                       'appearance': candidate.get('appearance', ''),
+                      'character_id': candidate.get('existing_id'),
                       'segment_indices': sorted({entry['segment_index'] for entry in candidate.get('occurrences', [])
                                                   if isinstance(entry, dict) and type(entry.get('segment_index')) is int})})
     return roles
+
+
+def narration_style_instruction(style: str) -> str:
+    if style == 'concise':
+        return ' Style: concise. Prioritize the key visible action, subject and object; omit redundant adjectives.'
+    if style == 'cinematic':
+        return ' Style: cinematic. Use restrained, factual descriptions of visible light, composition and environment alongside the main action. Never invent emotion, atmosphere sounds, motives or off-screen events.'
+    raise PipelineError('Unsupported narration style. Choose concise or cinematic.')
+
+
+def _name_pattern(name: str):
+    escaped = re.escape(unicodedata.normalize('NFKC', name).casefold())
+    # Latin names must not accidentally match substrings such as Ann in banner.
+    if re.fullmatch(r"[a-zA-Z0-9 '’._-]+", name):
+        escaped = r'(?<![a-z0-9])' + escaped + r'(?![a-z0-9])'
+    return re.compile(escaped, re.IGNORECASE)
+
+
+def contains_withheld_name(text: str, withheld: list[str]) -> bool:
+    normalized = unicodedata.normalize('NFKC', text).casefold()
+    return any(_name_pattern(name).search(normalized) for name in withheld if name)
+
+
+def mask_withheld_names(text: str, withheld: list[str]) -> str:
+    if not contains_withheld_name(text, withheld):
+        return text
+    # Redact whole context entries rather than altering their meaning or
+    # accidentally revealing the identity through an alias or sentence fragment.
+    return '[Character naming is not yet available in this interval.]'
+
+
+def timed_character_context(cards: list[dict], source_start: float):
+    usable, withheld = [], []
+    for card in cards:
+        if not isinstance(card, dict) or not all(card.get(key) for key in ('id', 'preferred_name', 'appearance')):
+            continue
+        available = _number(card.get('name_available_from', 0), 'Character name availability')
+        if available < 0:
+            raise PipelineError('Character name availability cannot be negative.')
+        if source_start < available:
+            before = str(card.get('before_name') or '').strip()
+            forbidden = [str(card['preferred_name']), *[str(alias) for alias in card.get('aliases', [])
+                         if str(alias).strip().casefold() != before.casefold()]]
+            withheld.extend(forbidden)
+            label = before or str(card['appearance'])
+            if contains_withheld_name(label, forbidden):
+                label = '画面中的人物 / the visible character'
+            usable.append({'id': card['id'], 'preferred_name': label,
+                           'appearance': mask_withheld_names(str(card['appearance']), forbidden), 'aliases': []})
+        else:
+            usable.append({'id': card['id'], 'preferred_name': card['preferred_name'],
+                           'appearance': card['appearance'], 'aliases': card.get('aliases', [])[:5]})
+    # A second card must not leak another card's embargoed name.
+    for card in usable:
+        for field in ('preferred_name', 'appearance'):
+            card[field] = mask_withheld_names(str(card[field]), withheld)
+        card['aliases'] = [alias for alias in card['aliases'] if not contains_withheld_name(alias, withheld)]
+    return usable, list(dict.fromkeys(withheld))
 
 
 def _generate_description(segment: dict[str, Any], frames: list[dict[str, Any]], transcript: dict[str, Any],
@@ -284,19 +353,24 @@ def _generate_description(segment: dict[str, Any], frames: list[dict[str, Any]],
     budget = max(1, math.floor(max(0.1, segment["silence_duration"] - 0.25) * (3.8 if language == 'zh-CN' else 2.15)))
     visual_start = segment.get('source_start', segment['start_time'])
     visual_end = segment.get('source_end', segment['end_time'])
-    characters = [{'id': card['id'], 'preferred_name': card['preferred_name'],
-                   'appearance': card['appearance'], 'aliases': card.get('aliases', [])[:5]}
-                  for card in _setting(settings, 'character_context', [])
-                  if isinstance(card, dict) and card.get('id') and card.get('preferred_name') and card.get('appearance')]
+    characters, withheld = timed_character_context(_setting(settings, 'character_context', []), visual_start)
+    unavailable_ids = {card['id'] for card in _setting(settings, 'character_context', [])
+                       if isinstance(card, dict) and card.get('id')
+                       and visual_start < _number(card.get('name_available_from', 0), 'Character name availability')}
+    style = _setting(settings, 'narration_style', 'concise')
+    style_instruction = narration_style_instruction(style)
     fictional_roles = [{key: role[key] for key in ('name', 'visual_evidence', 'appearance')}
                        for role in _setting(settings, 'detected_fictional_roles', [])
-                       if segment.get('segment_index') in role.get('segment_indices', [])]
+                       if segment.get('segment_index') in role.get('segment_indices', [])
+                       and role.get('character_id') not in unavailable_ids
+                       and not any(contains_withheld_name(str(role.get(key, '')), withheld)
+                                   for key in ('name', 'visual_evidence', 'appearance'))]
     # Dialogue is context, not visual evidence. Do not leak later plot events
     # into an earlier description, especially for an inserted freeze frame.
     context = [{k: p[k] for k in ('text', 'start', 'end', 'confidence') if k in p}
                for p in transcript.get('phrases', [])
                if p['end'] >= visual_start - 6 and p['end'] <= visual_end]
-    instructions = ("Write concise audio description for a blind or low-vision viewer. The images are chronological video frames. "
+    instructions = ("Write audio description for a blind or low-vision viewer. The images are chronological video frames. "
                     "First compare every frame and record directly visible facts with their zero-based frame_indices. "
                     "Write the description only from those observations. Check every subject, object, action and adjective against the images. "
                     "Describe only directly visible, useful actions, appearance, setting, scene changes, and on-screen text. "
@@ -304,7 +378,7 @@ def _generate_description(segment: dict[str, Any], frames: list[dict[str, Any]],
                     "Use stable visible labels (such as clothing or species), never a guessed name from dialogue or prior descriptions. "
                     "Named character cards provide user-confirmed or visually recognized fictional names and appearance descriptions. "
                     "Use their preferred name only if the visible person clearly matches that card. "
-                    "Distinctive fictional character designs may be named directly, such as Spider-Man from his recognizable suit and mask. "
+                    "Distinctive fictional character designs may be named directly only when the supplied current character guidance permits the name. "
                     "Use current_interval_fictional_roles when the listed visual design is clearly present in these frames; prefer the role name to a generic masked figure. "
                     "Never identify a real actor or person from their face, or assume a plain-clothed person is the masked role without visual continuity. "
                     "Do not import a character biography or off-screen plot. If the design is ambiguous, use an appearance label. "
@@ -320,11 +394,14 @@ def _generate_description(segment: dict[str, Any], frames: list[dict[str, Any]],
                     "Return only JSON: {\"observations\":[{\"fact\":\"visible fact\",\"frame_indices\":[0]}],\"description\":\"spoken text\",\"character_ids\":[]}. "
                     "character_ids must contain only IDs of clearly matched named cards mentioned in the description; roles without card IDs add no ID. "
                     "Use an empty description and empty observations if nothing useful can be described reliably.")
+    instructions += style_instruction + ' Use only the supplied currently available character labels. A label can deliberately hide a later name; do not infer or restore that name from film knowledge or images.'
     content = [{"type": "text", "text": json.dumps({
         "output_language": language, "mode": 'extended' if 'insertion_time' in segment else 'standard',
         "source_interval_start_seconds": visual_start, "source_interval_end_seconds": visual_end,
         "narration_budget_seconds": segment['silence_duration'],
-        "maximum_spoken_units": budget, "nearby_dialogue_context_only": context, "previous_descriptions": previous[-3:],
+        "maximum_spoken_units": budget, "narration_style": style,
+        "nearby_dialogue_context_only": [{**item, 'text': mask_withheld_names(str(item['text']), withheld)} for item in context],
+        "previous_descriptions": [mask_withheld_names(text, withheld) for text in previous[-3:]],
         "confirmed_character_cards": characters,
         "current_interval_fictional_roles": fictional_roles,
         "frame_timestamps_seconds": [round(f["timestamp"], 3) for f in frames]}, ensure_ascii=False)}]
@@ -356,9 +433,15 @@ def _generate_description(segment: dict[str, Any], frames: list[dict[str, Any]],
             if not isinstance(description, str) or not isinstance(observations, list):
                 raise ValueError('Invalid description or observations')
             description = " ".join(description.split())
+            if contains_withheld_name(description, withheld):
+                raise PipelineError('The description reveals a character name before its allowed time. Review the character card and retry.')
             if len(description) > 2000 or len(observations) > 24 or (description and not observations):
                 raise ValueError('Description requires bounded frame evidence')
             for observation in observations:
+                if not isinstance(observation, dict):
+                    raise ValueError('Invalid frame evidence')
+                if contains_withheld_name(str(observation.get('fact', '')), withheld):
+                    raise PipelineError('The description evidence reveals a character name before its allowed time.')
                 indices = observation['frame_indices']
                 if (not isinstance(observation['fact'], str) or not observation['fact'].strip()
                         or not isinstance(indices, list) or not indices
@@ -371,17 +454,42 @@ def _generate_description(segment: dict[str, Any], frames: list[dict[str, Any]],
             raise
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise PipelineError("Azure OpenAI did not return a valid description with frame evidence. Retry this segment.") from exc
+        segment['visual_evidence'] = [{'fact': item['fact'],
+            'frame_timestamps': [round(frames[i]['timestamp'], 3) for i in item['frame_indices']]} for item in observations]
+        segment['frame_timestamps'] = [round(frame['timestamp'], 3) for frame in frames]
+        segment['evidence_description'] = description
+        segment['character_ids'] = list(dict.fromkeys(character_ids)) if description else []
         if _word_count(description) <= budget:
-            segment['visual_evidence'] = [{'fact': item['fact'],
-                'frame_timestamps': [round(frames[i]['timestamp'], 3) for i in item['frame_indices']]} for item in observations]
-            segment['frame_timestamps'] = [round(frame['timestamp'], 3) for frame in frames]
-            segment['evidence_description'] = description
-            segment['character_ids'] = list(dict.fromkeys(character_ids)) if description else []
             return description, usage
         if attempt == 0:
             messages.extend([{'role': 'assistant', 'content': message['content']},
                              {'role': 'user', 'content': f'Shorten the description to at most {budget} spoken units. Keep only the most useful visible fact, preserve its meaning and frame evidence. Return the same JSON structure.'}])
-    raise PipelineError('The visual description is too long for its narration window. Try extended narration mode.')
+    raise DescriptionWindowTooShort(description, usage)
+
+
+def _extend_overflow_windows(segments: list[dict[str, Any]], settings: Any) -> bool:
+    """Reuse a small set of described natural windows as pauses, without AI calls.
+
+    The extended renderer handles the entire version, not a mix of in-gap and
+    inserted narration. Never drop excess windows or silently change Standard.
+    """
+    from .extended import MAX_INSERTIONS, NARRATION_BUDGET_SECONDS
+    if (_setting(settings, 'narration_mode', 'auto') != 'auto'
+            or not any(s.get('description_requires_shortening') for s in segments)
+            or not 0 < len(segments) <= MAX_INSERTIONS
+            or any('insertion_time' in s for s in segments)):
+        return False
+    budget = math.floor((NARRATION_BUDGET_SECONDS - .25) *
+                        (3.8 if _setting(settings, 'speech_language', 'en-US') == 'zh-CN' else 2.15))
+    if any(_word_count(s['dvi_text']) > budget for s in segments):
+        return False
+    for segment in segments:
+        segment.update(source_start=segment['start_time'], source_end=segment['end_time'],
+                       insertion_time=segment['end_time'], silence_duration=NARRATION_BUDGET_SECONDS,
+                       description_requires_shortening=False)
+        if segment['dvi_text']:
+            segment.pop('skip_reason', None)
+    return True
 
 
 def _synthesize(text: str, output_path: Path, window_duration: float, settings: Any, client: httpx.Client) -> int:
@@ -491,7 +599,12 @@ def process_video(input_path: Path, output_dir: Path, settings: Any, min_silence
     character_detection = {'status': 'DISABLED', 'added_count': 0, 'error': None}
     with httpx.Client(timeout=httpx.Timeout(600, connect=20), follow_redirects=False) as client:
         on_step("TranscribeVideo", "RUNNING", {})
-        if media["has_audio"]:
+        if _setting(settings, 'dialogue_language', 'auto') == 'none':
+            transcript = {"text": "", "words": [], "phrases": [], "language": "und",
+                          "timing_source": "user_declared_no_dialogue",
+                          "dialogue_status": "no_speech", "dialogue_reason": "user_declared_no_dialogue",
+                          "quality": {"review_required": False, "method": "user_declared_no_dialogue"}}
+        elif media["has_audio"]:
             audio_path = output_dir / "dialogue.wav"
             _run([str(_setting(settings, "ffmpeg_bin", "ffmpeg")), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
                   "-protocol_whitelist", "file,pipe", "-i", str(input_path), "-map", "0:a:0", "-vn", "-ac", "1",
@@ -502,7 +615,9 @@ def process_video(input_path: Path, output_dir: Path, settings: Any, min_silence
             transcript = transcribe_audio(audio_path, settings)
             usage["transcription_audio_seconds"] = media["duration"]
         else:
-            transcript = {"text": "", "words": [], "phrases": [], "timing_source": "no_audio_track", "language": "und"}
+            transcript = {"text": "", "words": [], "phrases": [], "timing_source": "no_audio_track", "language": "und",
+                          "dialogue_status": "no_speech", "dialogue_reason": "no_audio_track",
+                          "quality": {"review_required": False, "method": "no_audio_track"}}
         from .transcription import CUE_FORMAT_VERSION, transcript_cues
         transcript['cues'] = transcript_cues(transcript)
         transcript['cue_format_version'] = CUE_FORMAT_VERSION
@@ -513,7 +628,18 @@ def process_video(input_path: Path, output_dir: Path, settings: Any, min_silence
         windows = calculate_dialogue_windows(transcript["words"], media["duration"], minimum)
         mode = _setting(settings, 'narration_mode', 'auto')
         use_extended = mode == 'extended' or (mode == 'auto' and not windows)
-        if use_extended:
+        if transcript.get('dialogue_status') == 'unrecognized':
+            # An empty ASR response is not proof of silence. The only verified
+            # interruption-free position is after the original audio has ended.
+            use_extended = mode != 'standard'
+            windows = []
+            if use_extended:
+                from .extended import NARRATION_BUDGET_SECONDS
+                end = media['duration']
+                start = max(0.0, end - 15.0)
+                windows = [{'source_start': start, 'source_end': end, 'insertion_time': end,
+                            'start_time': start, 'end_time': end, 'silence_duration': NARRATION_BUDGET_SECONDS}]
+        elif use_extended:
             from .extended import plan_extended_windows
             windows = plan_extended_windows(transcript, media['duration'])
         if len(windows) > 120:
@@ -552,7 +678,14 @@ def process_video(input_path: Path, output_dir: Path, settings: Any, min_silence
         on_step("GenerateDVI", "RUNNING", {"num_segments": len(segments)})
         previous = []
         for segment, segment_frames in zip(segments, frames):
-            text, model_usage = _generate_description(segment, segment_frames, transcript, previous, settings, client)
+            try:
+                text, model_usage = _generate_description(segment, segment_frames, transcript, previous, settings, client)
+            except DescriptionWindowTooShort as overflow:
+                # Only a length failure with validated evidence is recoverable.
+                # Refusals, malformed evidence and withheld names still fail.
+                text, model_usage = overflow.description, overflow.usage
+                segment['description_requires_shortening'] = True
+                segment['skip_reason'] = 'The saved draft exceeds this narration window. Shorten it or generate an extended version.'
             segment.update(dvi_text=text, word_count=_word_count(text), char_count=len(text))
             if text:
                 previous.append(text)
@@ -562,10 +695,13 @@ def process_video(input_path: Path, output_dir: Path, settings: Any, min_silence
             for name in ("prompt_tokens", "completion_tokens", "total_tokens"):
                 usage[name] += int(model_usage.get(name) or 0)
             on_step("GenerateDVI", "RUNNING", {"completed_segments": segment["segment_index"] + 1, "num_segments": len(segments)})
+        if not use_extended and _extend_overflow_windows(segments, settings):
+            use_extended = True
         on_step("GenerateDVI", "SUCCEEDED", {"generated_descriptions": len(previous), "num_segments": len(segments)})
         def checkpoint(stage):
             temporary = output_dir / 'generation-checkpoint.json.tmp'
             temporary.write_text(json.dumps({'stage': stage, 'segments': segments, 'usage': usage,
+                'dialogue_status': transcript.get('dialogue_status'), 'dialogue_reason': transcript.get('dialogue_reason'),
                 'character_candidates': character_candidates, 'character_detection': character_detection,
                 'source_video_duration': media['duration'], 'narration_mode': 'extended' if use_extended else 'standard',
                 'language': _setting(settings, 'speech_language', 'en-US'),
@@ -575,7 +711,7 @@ def process_video(input_path: Path, output_dir: Path, settings: Any, min_silence
         checkpoint('described')
         on_step("SynthesizeAudio", "RUNNING", {"num_segments": len(segments)})
         for segment in segments:
-            if not segment["dvi_text"]:
+            if not segment["dvi_text"] or segment.get('description_requires_shortening'):
                 continue
             raw_path = audio_dir / f"segment-{segment['segment_index']:03d}-raw.wav"
             rate = _synthesize(segment["dvi_text"], raw_path, segment["silence_duration"], settings, client)
@@ -627,13 +763,18 @@ def process_video(input_path: Path, output_dir: Path, settings: Any, min_silence
                "total_audio_duration": sum(s["audio_duration"] for s in segments), "video_duration": output_duration,
                "source_video_duration": media['duration'], "processing_seconds": time.monotonic() - started}
     if not segments:
-        summary["message"] = "对白过于密集，没有足够的自然间隙；本次只生成字幕。请选择自动或扩展口述模式后重新生成。"
+        summary["message"] = ("未识别到可靠对白时间；已按保持原时长的选择保留原声，未插入解说。可确认无对白或使用自动模式。"
+                              if transcript.get('dialogue_status') == 'unrecognized' else
+                              "对白过于密集，没有足够的自然间隙；本次只生成字幕。请选择自动或扩展口述模式后重新生成。")
     elif not summary["passed_segments"]:
         summary["message"] = "本次没有生成可播放的口述配音，请检查未配音段落的原因后重试。"
     elif use_extended:
         summary['message'] = '已使用扩展口述：在句间暂停画面播放解说，原对白完整保留，成片时长增加。'
     outcome = 'subtitles_only' if not summary['passed_segments'] else 'partial' if summary['failed_segments'] else 'audio_description'
     result = {"segments": segments, "summary": summary, "output_path": str(output_path), "usage": usage,
+              'dialogue_status': transcript.get('dialogue_status', 'recognized' if transcript['words'] else 'no_speech'),
+              'dialogue_reason': transcript.get('dialogue_reason', 'recognized' if transcript['words'] else 'no_recognized_dialogue'),
+              "narration_style": _setting(settings, 'narration_style', 'concise'),
               'character_candidates': character_candidates, 'character_detection': character_detection,
               "transcript_path": str(transcript_path), "narration_path": str(narration_path),
               'source_transcript_path': str(source_transcript_path), 'insertions': insertions,

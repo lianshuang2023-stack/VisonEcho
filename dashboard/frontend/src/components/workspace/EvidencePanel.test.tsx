@@ -10,6 +10,14 @@ afterEach(() => { cleanup(); vi.resetAllMocks(); });
 function setup() { const props = { jobId: 'job-1', segmentIndex: 0, onSeek: vi.fn(), onCreateCharacter: vi.fn(), onDirtyChange: vi.fn(), onBusyChange: vi.fn() }; render(<EvidencePanel {...props} descriptionChanged />); return props; }
 
 describe('visual evidence review', () => {
+  it('keeps frame evidence and corrections without the removed explanatory paragraphs', async () => {
+    mocks.getSegmentEvidence.mockResolvedValue({ ...evidence, window_reason: 'extended_pause', generation_reason: 'visual_context' });
+    setup(); fireEvent.click(screen.getByRole('button', { name: '查看画面依据' }));
+    await screen.findByText('红衣女子走向门口。');
+    expect(screen.queryByText(/时间窗口：|描述目的：/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '查看原片 00:05.500' })).toBeVisible();
+    expect(screen.getByRole('textbox', { name: '画面纠错说明' })).toBeVisible();
+  });
   it('loads only on expansion and passes original frame seconds and references without remapping', async () => {
     const props = setup();
     expect(mocks.getSegmentEvidence).not.toHaveBeenCalled();

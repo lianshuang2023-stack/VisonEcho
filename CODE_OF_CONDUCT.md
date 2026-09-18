@@ -1,7 +1,9 @@
-# 协作约定
+# Code of conduct
 
-VisionEcho 的讨论围绕产品、代码和可复现事实展开。尊重不同经验、语言及无障碍需求，为建议提供清楚背景，针对具体问题提出改进方式。
+**English** | [简体中文](CODE_OF_CONDUCT.zh-CN.md)
 
-未经允许，不分享他人的个人信息、私有视频、账号凭据或工作区内容。
+VisionEcho discussions focus on the product, code and reproducible facts. Respect different levels of experience, languages and accessibility needs. Provide clear context for suggestions and propose improvements to specific issues.
 
-维护者可以要求修改不符合约定的内容，并限制持续破坏协作秩序的参与行为。需要处理争议时，使用已有的私密协作渠道联系仓库维护者。
+Do not share another person's personal information, private videos, account credentials or workspace contents without permission.
+
+Maintainers may request changes to content that does not follow these guidelines and restrict participation that repeatedly disrupts collaboration. Use an existing private channel to contact the maintainers about disputes.

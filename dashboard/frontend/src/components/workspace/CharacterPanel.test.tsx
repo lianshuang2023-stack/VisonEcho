@@ -67,8 +67,10 @@ describe('character cards', () => {
     expect(within(dialog).getByText('Alice opens the door.')).toBeVisible();
     expect(within(dialog).getByRole('button', { name: '应用到当前草稿' })).toBeDisabled();
     fireEvent.click(within(dialog).getByRole('checkbox'));
+    await waitFor(() => expect(within(dialog).getByRole('checkbox')).toBeChecked());
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '应用到当前草稿' })).toBeEnabled());
     fireEvent.click(within(dialog).getByRole('button', { name: '应用到当前草稿' }));
-    expect(props.onApply).toHaveBeenCalledWith([{ segmentIndex: 0, before: 'Ann opens the door.', after: 'Alice opens the door.', linked: true }]);
+    await waitFor(() => expect(props.onApply).toHaveBeenCalledWith([{ segmentIndex: 0, before: 'Ann opens the door.', after: 'Alice opens the door.', linked: true }]));
   });
   it('preserves a conflicting draft and guards cancellation with one active dialog', async () => {
     setup(); fireEvent.click(screen.getByRole('button', { name: '人物卡' }));

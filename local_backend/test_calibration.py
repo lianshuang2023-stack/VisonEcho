@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import pytest
 
 from fastapi.testclient import TestClient
 from local_backend import calibration, main
@@ -97,3 +98,88 @@ def test_auto_calibration_keeps_detected_source_language_after_manual_save(tmp_p
         assert saved.json()['language'] == 'zh-CN'
         assert saved.json()['dialogue_language'] == 'auto'
         assert saved.json()['revision'] == 2
+
+
+@pytest.mark.parametrize('recognition', [
+    {'cues': [], 'dialogue_status': 'unrecognized', 'dialogue_reason': 'speech_not_recognized'},
+    {'cues': []},
+])
+def test_empty_unrecognized_calibration_keeps_existing_subtitles(tmp_path, monkeypatch, recognition):
+    app, store, directory = setup(tmp_path)
+    saved = {'cues': [{'id': 'manual', 'start': 1, 'end': 3, 'text': '已校对内容'}], 'revision': 4}
+    draft = directory / 'transcript-edits.json'
+    draft.write_text(json.dumps(saved))
+    original_bytes = draft.read_bytes()
+    monkeypatch.setattr(calibration, 'calibrate_audio', lambda *args: recognition)
+    with TestClient(app) as client:
+        started = client.post('/api/videos/old/transcript/calibrate', json={'language': 'auto', 'revision': 4})
+        task = client.get('/api/transcript-calibrations/' + started.json()['calibration_id']).json()
+        assert task['status'] == 'FAILED' and '已保留现有字幕' in task['error']
+        assert client.get('/api/videos/old/transcript').json() == saved
+    assert draft.read_bytes() == original_bytes and not store.busy.locked()
+
+
+@pytest.mark.parametrize('reason', ['silent_audio', 'no_audio_track'])
+def test_verified_no_speech_can_clear_false_positive_subtitles(tmp_path, monkeypatch, reason):
+    app, store, _ = setup(tmp_path)
+    monkeypatch.setattr(calibration, 'calibrate_audio', lambda *args: {
+        'cues': [], 'dialogue_status': 'no_speech', 'dialogue_reason': reason})
+    with TestClient(app) as client:
+        started = client.post('/api/videos/old/transcript/calibrate', json={'language': 'auto', 'revision': 0})
+        task = client.get('/api/transcript-calibrations/' + started.json()['calibration_id']).json()
+        assert task['status'] == 'SUCCEEDED'
+        saved = client.get('/api/videos/old/transcript').json()
+        assert saved['cues'] == [] and saved['revision'] == 1
+        assert saved['dialogue_status'] == 'no_speech' and saved['dialogue_reason'] == reason
+    assert not store.busy.locked()
+
+
+def test_explicit_no_dialogue_clears_only_when_requested_and_needs_no_speech_service(tmp_path, monkeypatch):
+    from local_backend import pipeline, transcription
+    app, store, _ = setup(tmp_path)
+    store.settings.azure_speech_key = ''
+    store.settings.azure_speech_region = ''
+    def unexpected(*args, **kwargs):
+        raise AssertionError('Explicit no dialogue must not call media probing or Speech recognition.')
+    monkeypatch.setattr(pipeline, 'probe_media', unexpected)
+    monkeypatch.setattr(transcription, 'transcribe_audio', unexpected)
+    with TestClient(app) as client:
+        assert client.post('/api/videos/old/transcript/calibrate', json={'language': 'auto', 'revision': 0}).status_code == 503
+        started = client.post('/api/videos/old/transcript/calibrate', json={'language': 'none', 'revision': 0})
+        assert started.status_code == 200
+        saved = client.get('/api/videos/old/transcript').json()
+        assert saved['cues'] == [] and saved['revision'] == 1
+        assert saved['language'] == saved['dialogue_language'] == 'none'
+        assert saved['dialogue_status'] == 'no_speech' and saved['dialogue_reason'] == 'user_declared_no_dialogue'
+        # Sending altered read-only metadata cannot relabel the source status.
+        submitted = {**saved, 'dialogue_status': 'recognized', 'dialogue_reason': 'recognized'}
+        result = client.put('/api/videos/old/transcript', json=submitted)
+        assert result.status_code == 200
+        assert result.json()['dialogue_status'] == 'no_speech'
+        assert result.json()['dialogue_reason'] == 'user_declared_no_dialogue'
+
+
+def test_no_audio_calibration_records_verified_empty_metadata(tmp_path, monkeypatch):
+    from local_backend import pipeline, transcription
+    monkeypatch.setattr(pipeline, 'probe_media', lambda *args: {'has_audio': False})
+    monkeypatch.setattr(transcription, 'transcribe_audio', lambda *args: (_ for _ in ()).throw(AssertionError('No ASR for no audio')))
+    result = calibration.calibrate_audio(tmp_path / 'video.mp4', tmp_path / 'work', Settings())
+    assert result['dialogue_status'] == 'no_speech' and result['dialogue_reason'] == 'no_audio_track'
+
+
+def test_calibration_preserves_distinct_overlapping_speakers_and_quality(tmp_path, monkeypatch):
+    app, store, _ = setup(tmp_path)
+    recognized = {'language': 'zh-CN', 'cues': [
+        {'id': 'a', 'start': 1, 'end': 4, 'text': '等一下！', 'speaker': 'speaker_1', 'low_confidence': True},
+        {'id': 'b', 'start': 2, 'end': 3, 'text': '怎么了？', 'speaker': 'speaker_2'}],
+        'quality': {'speaker_count': 2, 'diarization_available': True, 'overlapping_utterance_count': 1}}
+    monkeypatch.setattr(calibration, 'calibrate_audio', lambda *args: recognized)
+    with TestClient(app) as client:
+        started = client.post('/api/videos/old/transcript/calibrate', json={'language': 'zh-CN', 'revision': 0}).json()
+        task = client.get('/api/transcript-calibrations/' + started['calibration_id']).json()
+        assert task['status'] == 'SUCCEEDED'
+        saved = client.get('/api/videos/old/transcript').json()
+        assert [cue['text'] for cue in saved['cues']] == ['等一下', '怎么了']
+        assert [cue['speaker'] for cue in saved['cues']] == ['speaker_1', 'speaker_2']
+        assert saved['cues'][0]['low_confidence'] is True and saved['quality'] == recognized['quality']
+    assert not store.busy.locked()

@@ -78,6 +78,8 @@ def test_saved_frames_and_facts_expose_only_public_references(workspace):
                    for i, timestamp in enumerate([2.5, 4, 5.5])],
         'observations': [{'fact': 'A person opens a door.', 'frame_ids': ['f1', 'f2']}],
         'feedback': {'revision': 0, 'issues': [], 'note': ''},
+        'generation_reason': 'visual_context',
+        'window_reason': 'dialogue_gap', 'nearby_dialogue': [],
     }
     assert str(store.root) not in json.dumps(document)
     assert get_evidence_document(store, 'original', 0, settings) == document

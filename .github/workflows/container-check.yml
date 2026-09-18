@@ -77,11 +77,11 @@ jobs:
           test "$(docker image inspect visionecho:local --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
           test "$(docker image inspect caddy:2-alpine --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
           docker save visionecho:local caddy:2-alpine | gzip -1 > server-bundle/images.tar.gz
-          cp deploy/compose.yml deploy/Caddyfile.example deploy/server.env.example deploy/README.zh-CN.md server-bundle/deploy/
+          cp deploy/compose.yml deploy/Caddyfile.example deploy/server.env.example deploy/README.md deploy/README.zh-CN.md server-bundle/deploy/
           cp LICENSE NOTICE server-bundle/
           printf '%s\n' "Source commit: $GITHUB_SHA" "Actions run: $GITHUB_RUN_ID" "Run attempt: $GITHUB_RUN_ATTEMPT" > server-bundle/build-info.txt
           printf '%s\n' 'Load images with: docker load < images.tar.gz' 'Configure deploy/server.env on the server; no real credentials or runtime data are included.' 'Start after configuration: docker compose --env-file deploy/server.env -f deploy/compose.yml up -d --no-build --pull never' > server-bundle/LOAD.txt
-          (cd server-bundle && sha256sum images.tar.gz images.txt build-info.txt LOAD.txt LICENSE NOTICE deploy/compose.yml deploy/Caddyfile.example deploy/server.env.example deploy/README.zh-CN.md > SHA256SUMS)
+          (cd server-bundle && sha256sum images.tar.gz images.txt build-info.txt LOAD.txt LICENSE NOTICE deploy/compose.yml deploy/Caddyfile.example deploy/server.env.example deploy/README.md deploy/README.zh-CN.md > SHA256SUMS)
           test ! -e server-bundle/deploy/server.env
           test ! -e server-bundle/.local-data
           test ! -e server-bundle/.hosted-data

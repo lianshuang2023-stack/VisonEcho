@@ -18,6 +18,7 @@ from fastapi import HTTPException
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from .lifecycle import require_video, require_collection, video_deleted, video_running
+from .subtitles import SPEAKER_PATTERN, normalize_subtitle_text, subtitle_cue_view, speaker_label
 
 
 class ProjectUpdate(BaseModel):
@@ -39,14 +40,20 @@ class TranscriptCue(BaseModel):
     start: float = Field(ge=0, allow_inf_nan=False)
     end: float = Field(gt=0, allow_inf_nan=False)
     text: str = Field(min_length=1, max_length=5000)
+    speaker: str | None = Field(default=None, pattern='^' + SPEAKER_PATTERN + '$', strict=True)
+    confidence: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    uncertain: StrictBool | None = None
+    low_confidence: StrictBool | None = None
 
 
 class TranscriptUpdate(BaseModel):
     model_config = ConfigDict(extra='forbid')
     cues: list[TranscriptCue] = Field(max_length=10000)
     revision: int = Field(ge=0, strict=True)
-    language: Literal['auto', 'en-US', 'zh-CN'] | None = None
-    dialogue_language: Literal['auto', 'en-US', 'zh-CN'] | None = None
+    language: Literal['auto', 'en-US', 'zh-CN', 'none'] | None = None
+    dialogue_language: Literal['auto', 'en-US', 'zh-CN', 'none'] | None = None
+    dialogue_status: Literal['recognized', 'no_speech', 'unrecognized'] | None = None
+    dialogue_reason: Literal['recognized', 'silent_audio', 'no_audio_track', 'speech_not_recognized', 'user_declared_no_dialogue'] | None = None
 
 
 def _now():
@@ -82,7 +89,7 @@ def _job_reviewed(job, transcript_revision=None):
     return bool(job.get('reviewed') and job.get('reviewed_transcript_revision') == revision)
 
 
-def _project_record(data, video_id: str, settings=None):
+def _project_record(data, video_id: str, settings=None, store=None):
     source = data['inputs'].get(video_id)
     if source is None:
         raise HTTPException(404, 'Video project not found.')
@@ -93,7 +100,13 @@ def _project_record(data, video_id: str, settings=None):
     status = 'draft'
     if latest:
         status = {'RUNNING': 'processing', 'SUCCEEDED': 'ready'}.get(latest.get('status'), 'failed')
-    reviewed = _job_reviewed(latest)
+    reviewed = False
+    if store is not None and latest and latest.get('status') == 'SUCCEEDED':
+        try:
+            from .review import _document_locked
+            reviewed = _document_locked(store, latest.get('execution_arn'))[0]['review_complete']
+        except HTTPException:
+            pass
     workflow_status = ('exportable' if reviewed else 'review') if status == 'ready' else status
     latest_result = (latest or {}).get('result', {})
     summary = latest_result.get('summary', {})
@@ -148,7 +161,7 @@ def _execution_record(job, settings):
 
 def _get_result(store, job_id):
     job = store.data['executions'].get(job_id)
-    if not job:
+    if not job or job.get('deleted') or job.get('deleted_at'):
         raise HTTPException(404, 'Result not found.')
     require_video(store.data, job.get('video_id'))
     if job.get('status') != 'SUCCEEDED' or not isinstance(job.get('result'), dict) or not job['result']:
@@ -171,12 +184,13 @@ def _duration(store, job, result):
 def _validate_cues(cues, duration):
     normalized, ids = [], set()
     cursor = 0.0
+    active = []
     for cue in cues:
-        item = cue.model_dump() if isinstance(cue, TranscriptCue) else dict(cue)
+        item = cue.model_dump(exclude_unset=True) if isinstance(cue, TranscriptCue) else dict(cue)
         try:
             start, end = float(item['start']), float(item['end'])
             cue_id = str(item['id']).strip()
-            text = ' '.join(str(item['text']).split())
+            text = normalize_subtitle_text(item['text'])
         except (KeyError, TypeError, ValueError, OverflowError):
             raise HTTPException(422, 'Every subtitle needs an ID, text, and valid start/end times.') from None
         if not cue_id or cue_id in ids:
@@ -185,16 +199,31 @@ def _validate_cues(cues, duration):
             raise HTTPException(422, 'Remove an empty subtitle row instead of saving blank text.')
         if not math.isfinite(start) or not math.isfinite(end) or not 0 <= start < end <= duration:
             raise HTTPException(422, 'Subtitle times must be within the video duration, with end after start.')
+        speaker = item.get('speaker')
+        if speaker is not None and (not isinstance(speaker, str) or not re.fullmatch(SPEAKER_PATTERN, speaker)):
+            raise HTTPException(422, 'Subtitle speaker must be a stable speaker identifier or unknown.')
         if start < cursor:
-            raise HTTPException(422, 'Subtitles must be ordered by start time and must not overlap.')
+            raise HTTPException(422, 'Subtitles must be ordered by start time.')
+        active = [entry for entry in active if entry['end'] > start]
+        if any(not speaker or not entry.get('speaker') or speaker == entry.get('speaker') for entry in active):
+            raise HTTPException(422, 'Overlapping subtitles require different known speakers.')
         ids.add(cue_id)
-        normalized.append({'id': cue_id, 'start': start, 'end': end, 'text': text})
-        cursor = end
+        entry = {'id': cue_id, 'start': start, 'end': end, 'text': text}
+        if 'speaker' in item:
+            entry['speaker'] = speaker
+        # Validation can preserve provider signals from trusted saved payloads;
+        # the user-save route restores these from its current server snapshot.
+        for key in ('confidence', 'uncertain', 'low_confidence'):
+            if key in item:
+                entry[key] = item[key]
+        normalized.append(entry)
+        active.append(entry)
+        cursor = start
     return normalized
 
 
 def _source_cues(payload):
-    if (payload.get('timing_source') == 'azure_speech_continuous'
+    if (payload.get('timing_source') in ('azure_speech_continuous', 'azure_speech_conversation')
             and payload.get('phrases') and payload.get('words')):
         from .transcription import CUE_FORMAT_VERSION, transcript_cues
         if payload.get('cue_format_version') != CUE_FORMAT_VERSION:
@@ -205,19 +234,21 @@ def _source_cues(payload):
         return payload['cues']
     phrases = payload.get('phrases') or []
     if phrases:
-        return [{'id': f'cue-{index + 1}', 'start': p['start'], 'end': p['end'], 'text': p['text']}
+        return [{'id': f'cue-{index + 1}', 'start': p['start'], 'end': p['end'], 'text': p['text'],
+                 **({'speaker': p['speaker']} if 'speaker' in p else {})}
                 for index, p in enumerate(phrases) if str(p.get('text', '')).strip()]
     # Older normalized transcripts can contain word timing without phrases.
     cues, group = [], []
     def flush():
         if group:
             cues.append({'id': f'cue-{len(cues) + 1}', 'start': group[0]['start'],
-                         'end': group[-1]['end'], 'text': ' '.join(str(w['text']) for w in group)})
+                         'end': group[-1]['end'], 'text': ' '.join(str(w['text']) for w in group),
+                         **({'speaker': group[0]['speaker']} if 'speaker' in group[0] else {})})
             group.clear()
     for word in payload.get('words') or []:
         if not str(word.get('text', '')).strip():
             continue
-        if group and (float(word['start']) - float(group[-1]['end']) >= 0.7 or
+        if group and (word.get('speaker') != group[-1].get('speaker') or float(word['start']) - float(group[-1]['end']) >= 0.7 or
                       float(word['end']) - float(group[0]['start']) > 6 or len(group) >= 12):
             flush()
         group.append(word)
@@ -233,7 +264,8 @@ def _transcript_quality(payload):
         return {}
     # Only expose review signals, never arbitrary Speech provider payloads.
     signals = {key: quality[key] for key in ('review_required', 'low_confidence_phrase_count',
-               'low_confidence_word_count', 'no_match_count') if isinstance(quality.get(key), (bool, int))}
+               'low_confidence_word_count', 'no_match_count', 'speaker_count', 'diarization_available',
+               'overlapping_utterance_count') if isinstance(quality.get(key), (bool, int))}
     if 'review_required' not in signals and any(
             signals.get(key, 0) > 0 for key in ('low_confidence_phrase_count', 'low_confidence_word_count', 'no_match_count')):
         signals['review_required'] = True
@@ -247,7 +279,7 @@ def _transcript(store, job_id):
         saved = _read_json(draft)
         if not isinstance(saved, dict) or not isinstance(saved.get('cues'), list) or type(saved.get('revision')) is not int:
             raise HTTPException(409, 'The saved transcript has an invalid format.')
-        return saved
+        return {**saved, 'cues': subtitle_cue_view(saved['cues'])}
     raw_path = result.get('transcript_path')
     if not raw_path:
         raise HTTPException(404, 'A dialogue transcript is not available for this result.')
@@ -261,11 +293,15 @@ def _transcript(store, job_id):
         raise HTTPException(409, 'The original transcript contains invalid timing data.') from None
     # Preserve original phrase boundaries for review; edited timelines are
     # checked strictly on save.
-    transcript = {'cues': cues, 'revision': 0}
-    if payload.get('language') in ('auto', 'en-US', 'zh-CN'):
+    transcript = {'cues': subtitle_cue_view(cues), 'revision': 0}
+    if payload.get('language') in ('auto', 'en-US', 'zh-CN', 'none'):
         transcript['language'] = payload['language']
-    if result.get('dialogue_language') in ('auto', 'en-US', 'zh-CN'):
+    if result.get('dialogue_language') in ('auto', 'en-US', 'zh-CN', 'none'):
         transcript['dialogue_language'] = result['dialogue_language']
+    if payload.get('dialogue_status') in ('recognized', 'no_speech', 'unrecognized'):
+        transcript['dialogue_status'] = payload['dialogue_status']
+    if payload.get('dialogue_reason') in ('recognized', 'silent_audio', 'no_audio_track', 'speech_not_recognized', 'user_declared_no_dialogue'):
+        transcript['dialogue_reason'] = payload['dialogue_reason']
     if _transcript_quality(payload):
         transcript['quality'] = _transcript_quality(payload)
     return transcript
@@ -280,7 +316,11 @@ def _review_state(store, job_id):
         if exc.status_code != 404:
             raise
         revision = 0
-    reviewed = _job_reviewed(job, revision)
+    try:
+        from .review import _document_locked
+        reviewed = _document_locked(store, job_id)[0]['review_complete']
+    except HTTPException:
+        reviewed = False
     return {'reviewed': reviewed, 'reviewed_at': job.get('reviewed_at') if reviewed else None,
             'transcript_revision': revision}
 
@@ -293,16 +333,23 @@ def _subtitle_time(seconds, separator):
     return f'{hours:02}:{minutes:02}:{seconds:02}{separator}{milliseconds:03}'
 
 
-def _export_text(cues, format):
+def _export_text(cues, format, dialogue=False, language='en-US'):
     lines = ['WEBVTT', ''] if format == 'vtt' else []
     for index, cue in enumerate(cues, 1):
         separator = ',' if format == 'srt' else '.'
         times = f'{_subtitle_time(cue["start"], separator)} --> {_subtitle_time(cue["end"], separator)}'
         text = ' '.join(str(cue['text']).split())
+        label = speaker_label(cue.get('speaker'), language) if dialogue else None
+        if dialogue:
+            text = normalize_subtitle_text(text)
+        escaped = html.escape(text, quote=False)
+        if label:
+            text = label + ' ' + text
+            escaped = f'<v {label}>{escaped}</v>' if format == 'vtt' else label + ' ' + escaped
         if format == 'srt':
-            lines.extend([str(index), times, html.escape(text, quote=False), ''])
+            lines.extend([str(index), times, escaped, ''])
         elif format == 'vtt':
-            lines.extend([times, html.escape(text, quote=False), ''])
+            lines.extend([times, escaped, ''])
         else:
             lines.extend([times, text, ''])
     return '\n'.join(lines) + ('\n' if lines else '')
@@ -316,7 +363,7 @@ def register_project_routes(app, store, settings):
         with store.lock:
             if collection_id is not None:
                 require_collection(store.data, collection_id)
-            rows = [_project_record(store.data, video_id, settings) for video_id, source in store.data['inputs'].items()
+            rows = [_project_record(store.data, video_id, settings, store) for video_id, source in store.data['inputs'].items()
                     if not video_deleted(store.data, video_id) and
                     (collection_id is None or source.get('collection_id', 'default') == collection_id)]
         search = search.casefold().strip()
@@ -330,7 +377,7 @@ def register_project_routes(app, store, settings):
     def project(video_id: str):
         with store.lock:
             require_video(store.data, video_id)
-            record = _project_record(store.data, video_id, settings)
+            record = _project_record(store.data, video_id, settings, store)
             jobs = sorted((j for j in store.data['executions'].values() if j.get('video_id') == video_id),
                           key=lambda j: j.get('start_date', ''), reverse=True)
             executions = [_execution_record(job, settings) for job in jobs]
@@ -370,7 +417,7 @@ def register_project_routes(app, store, settings):
                 store.data.clear()
                 store.data.update(before)
                 raise HTTPException(500, 'Cannot save the project. Check local disk space and retry.') from None
-            return _project_record(store.data, video_id, settings)
+            return _project_record(store.data, video_id, settings, store)
 
     @app.get('/api/projects/{video_id}/thumbnail')
     def thumbnail(video_id: str):
@@ -448,6 +495,8 @@ def register_project_routes(app, store, settings):
                     raise HTTPException(422, '确认校对时请提交当前字幕版本。')
                 if payload.transcript_revision != state['transcript_revision']:
                     raise HTTPException(409, '字幕已在其他窗口更新，请重新检查后确认校对。')
+                from .review import require_review_complete
+                require_review_complete(store, job_id)
             before = copy.deepcopy(store.data)
             updated_at = _now()
             job.update(reviewed=payload.reviewed, transcript_revision=state['transcript_revision'])
@@ -456,6 +505,9 @@ def register_project_routes(app, store, settings):
             else:
                 job.pop('reviewed_at', None)
                 job.pop('reviewed_transcript_revision', None)
+                if job.get('segment_review'):
+                    job['segment_review']['revision'] += 1
+                    job['segment_review']['states'] = {key: 'draft' for key in job['segment_review'].get('states', {})}
             source = store.data['inputs'][job['video_id']]
             source['updated_at'] = updated_at
             try:
@@ -475,9 +527,15 @@ def register_project_routes(app, store, settings):
                 raise HTTPException(409, 'This transcript changed in another window. Reload it before saving.')
             job, result, directory = _get_result(store, job_id)
             cues = _validate_cues(payload.cues, _duration(store, job, result)) if payload.cues else []
+            original_cues = {cue['id']: cue for cue in current['cues']}
+            for cue in cues:
+                for field in ('confidence', 'uncertain', 'low_confidence'):
+                    cue.pop(field, None)
+                    if field in original_cues.get(cue['id'], {}):
+                        cue[field] = original_cues[cue['id']][field]
             saved = {'cues': cues, 'revision': current['revision'] + 1}
             # Text edits must not change recognition language metadata.
-            for key in ('language', 'dialogue_language', 'quality'):
+            for key in ('language', 'dialogue_language', 'dialogue_status', 'dialogue_reason', 'quality'):
                 if key in current:
                     saved[key] = current[key]
             draft = _safe_child(directory, 'transcript-edits.json')
@@ -516,7 +574,8 @@ def register_project_routes(app, store, settings):
         with store.lock:
             job, result, _ = _get_result(store, job_id)
             if kind == 'dialogue':
-                cues = _transcript(store, job_id)['cues']
+                transcript = _transcript(store, job_id)
+                cues = transcript['cues']
             else:
                 cues = [{'id': str(s.get('segment_index', index)), 'start': s['start_time'],
                          'end': s.get('end_time', s['start_time'] + s['silence_duration']), 'text': s['dvi_text']}
@@ -527,5 +586,5 @@ def register_project_routes(app, store, settings):
         filename = f'{stem}-{kind}.{format}'
         ascii_name = re.sub(r'[^a-zA-Z0-9._-]', '-', filename)
         mime = 'text/vtt' if format == 'vtt' else ('application/x-subrip' if format == 'srt' else 'text/plain')
-        return Response(_export_text(cues, format), media_type=mime,
+        return Response(_export_text(cues, format, dialogue=kind == 'dialogue', language=transcript.get('language', 'en-US') if kind == 'dialogue' else 'en-US'), media_type=mime,
                         headers={'Content-Disposition': f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(filename, safe="")}'} )

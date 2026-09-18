@@ -103,6 +103,20 @@ def test_project_save_failure_rolls_back_memory(workspace, monkeypatch):
     assert store.data['inputs'] == before
 
 
+def approve_export_fixture(client, store):
+    result = store.data['executions']['result-one']['result']
+    Path(result['output_path']).write_bytes(b'test export')
+    result['segments'][0]['audio_duration'] = 2
+    # Export formatting is tested with a completed rendition containing a
+    # single voiced segment. Failed/empty windows are covered by review tests.
+    result['segments'] = result['segments'][:1]
+    current = client.get('/api/videos/result-one/review-state').json()
+    approved = client.put('/api/videos/result-one/review-state', json={
+        'revision': current['revision'], 'transcript_revision': current['transcript_revision'],
+        'changes': [{'segment_index': 0, 'state': 'approved'}]})
+    assert approved.status_code == 200 and approved.json()['can_export']
+
+
 def test_transcript_edit_revision_conflicts_and_exports_use_saved_text(workspace):
     client, store, _ = workspace
     original = client.get('/api/videos/result-one/transcript').json()
@@ -114,22 +128,24 @@ def test_transcript_edit_revision_conflicts_and_exports_use_saved_text(workspace
     draft = json.loads((store.root / 'runs/result-one/transcript-edits.json').read_text())
     assert draft == saved.json()
     assert client.get('/api/videos/result-one/transcript').json() == saved.json()
+    approve_export_fixture(client, store)
     srt = client.get('/api/videos/result-one/export?kind=dialogue&format=srt')
-    assert '00:00:01,000 --> 00:00:02,500\nReviewed dialogue &amp; &lt;literal&gt;.' in srt.text
+    assert '00:00:01,000 --> 00:00:02,500\nReviewed dialogue &lt;literal&gt;' in srt.text
     assert '\n\n2\n' in srt.text
     assert srt.headers['content-disposition'].startswith('attachment;')
     vtt = client.get('/api/videos/result-one/export?kind=dialogue&format=vtt')
     assert vtt.text.startswith('WEBVTT\n\n00:00:01.000 --> 00:00:02.500\n')
     txt = client.get('/api/videos/result-one/export?kind=dialogue&format=txt')
-    assert 'Reviewed dialogue & <literal>.' in txt.text
+    assert 'Reviewed dialogue <literal>' in txt.text
     assert 'Original dialogue.' not in txt.text
 
 
 def test_clear_all_subtitles_is_saved_and_exported_as_empty(workspace):
-    client, _, _ = workspace
+    client, store, _ = workspace
     response = client.put('/api/videos/result-one/transcript', json={'revision': 0, 'cues': []})
     assert response.status_code == 200
     assert response.json() == {'revision': 1, 'cues': []}
+    approve_export_fixture(client, store)
     assert client.get('/api/videos/result-one/export?format=srt').text == ''
     assert client.get('/api/videos/result-one/export?format=vtt').text == 'WEBVTT\n\n'
 
@@ -150,7 +166,8 @@ def test_invalid_subtitle_timelines_are_rejected_without_creating_drafts(workspa
 
 
 def test_description_export_keeps_absolute_timing_and_excludes_skipped_text(workspace):
-    client, _, _ = workspace
+    client, store, _ = workspace
+    approve_export_fixture(client, store)
     response = client.get('/api/videos/result-one/export?kind=description&format=srt')
     assert '00:00:08,100 --> 00:00:11,200' in response.text
     assert 'A blue circle moves.' in response.text
@@ -166,7 +183,7 @@ def test_transcript_words_fallback_and_inherited_revision(workspace):
     ]}))
     response = client.get('/api/videos/result-one/transcript').json()
     assert len(response['cues']) == 2
-    assert response['cues'][0]['text'] == 'Hello there.'
+    assert response['cues'][0]['text'] == 'Hello there'
     draft = {'revision': 7, 'cues': response['cues']}
     path.with_name('transcript-edits.json').write_text(json.dumps(draft))
     assert client.get('/api/videos/result-one/transcript').json()['revision'] == 7
@@ -225,7 +242,7 @@ def test_legacy_machine_subtitles_refresh_without_rewriting_source_or_saved_edit
     path.write_text(json.dumps(payload))
     original = path.read_bytes()
     response = client.get('/api/videos/result-one/transcript').json()
-    assert response['cues'][0]['text'] == 'Hello, world!'
+    assert response['cues'][0]['text'] == 'Hello world'
     assert response['language'] == 'en-US'
     assert response['quality'] == {'review_required': True, 'low_confidence_phrase_count': 1}
     assert path.read_bytes() == original
@@ -238,7 +255,7 @@ def test_legacy_machine_subtitles_refresh_without_rewriting_source_or_saved_edit
     path.write_text(json.dumps(payload))
     draft = {'revision': 2, 'cues': [{'id': 'manual', 'start': 1, 'end': 3, 'text': 'Manual text.'}]}
     (path.parent / 'transcript-edits.json').write_text(json.dumps(draft))
-    assert client.get('/api/videos/result-one/transcript').json() == draft
+    assert client.get('/api/videos/result-one/transcript').json() == {**draft, 'cues': [{**draft['cues'][0], 'text': 'Manual text'}]}
 
 
 @pytest.mark.parametrize('signal', ['low_confidence_word_count', 'low_confidence_phrase_count', 'no_match_count'])

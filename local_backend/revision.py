@@ -156,9 +156,12 @@ def render_revision(input_path: Path, output_dir: Path, settings: Any,
     elif not summary["passed_segments"]:
         summary["message"] = "No narration could be fitted. Review skipped segment reasons."
     result = {"segments": segments, "summary": summary, "output_path": str(output_path), "usage": usage,
+              'dialogue_status': (source_result.get('source_transcript_edits') or {}).get('dialogue_status', source_result.get('dialogue_status')),
+              'dialogue_reason': (source_result.get('source_transcript_edits') or {}).get('dialogue_reason', source_result.get('dialogue_reason')),
               "transcript_path": str(transcript_path), "narration_path": str(narration_path),
               "language": _setting(settings, "speech_language", "en-US"),
               "dialogue_language": _setting(settings, "dialogue_language", "auto"),
+              "narration_style": source_result.get('narration_style', 'concise'),
               "voice": _setting(settings, "azure_speech_voice", "en-US-JennyNeural"),
               'narration_mode': 'extended' if extended else 'standard', 'insertions': insertions,
               'source_transcript_path': str(source_transcript_path),

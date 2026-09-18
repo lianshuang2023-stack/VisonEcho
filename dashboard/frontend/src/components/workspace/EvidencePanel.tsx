@@ -14,12 +14,14 @@ interface Props {
   onCreateCharacter: (frame: CharacterFrameSelection) => void;
   onDirtyChange: (segmentIndex: number, dirty: boolean) => void;
   onBusyChange: (segmentIndex: number, busy: boolean) => void;
+  defaultOpen?: boolean; onSaved?: () => void;
 }
 
-export default function EvidencePanel({ jobId, segmentIndex, disabled = false, descriptionChanged = false, onSeek, onCreateCharacter, onDirtyChange, onBusyChange }: Props) {
+export default function EvidencePanel({ jobId, segmentIndex, disabled = false, descriptionChanged = false, onSeek, onCreateCharacter, onDirtyChange, onBusyChange, defaultOpen = false, onSaved }: Props) {
   const { t, language } = useUiPreferences();
   const panelId = useId();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
+  const [showAllFrames, setShowAllFrames] = useState(false);
   const [evidence, setEvidence] = useState<SegmentEvidence | null>(null);
   const [feedback, setFeedback] = useState<EvidenceFeedback | null>(null);
   const [loading, setLoading] = useState(false);
@@ -29,6 +31,12 @@ export default function EvidencePanel({ jobId, segmentIndex, disabled = false, d
   const dirty = Boolean(feedback && evidence && JSON.stringify(feedback) !== JSON.stringify(evidence.feedback));
   useEffect(() => { onDirtyChange(segmentIndex, dirty); }, [dirty, onDirtyChange, segmentIndex]);
   useEffect(() => { onBusyChange(segmentIndex, saving); }, [saving, onBusyChange, segmentIndex]);
+  useEffect(() => {
+    if (!defaultOpen) return;
+    let active = true; setLoading(true);
+    getSegmentEvidence(jobId, segmentIndex).then(result => { if (active) { setEvidence(result); setFeedback(result.feedback); } }).catch(reason => { if (active) setError(errorMessage(reason)); }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [defaultOpen, jobId, segmentIndex]);
 
   async function load() {
     setLoading(true); setError('');
@@ -49,6 +57,7 @@ export default function EvidencePanel({ jobId, segmentIndex, disabled = false, d
       const result = await saveEvidenceFeedback(jobId, segmentIndex, feedback);
       setFeedback(result); setEvidence(previous => previous ? { ...previous, feedback: result } : previous);
       setNotice(t('纠错记录已保存。', 'Correction saved.'));
+      onSaved?.();
     } catch (reason) { setError(errorMessage(reason, language)); }
     finally { setSaving(false); }
   }
@@ -63,10 +72,12 @@ export default function EvidencePanel({ jobId, segmentIndex, disabled = false, d
       {evidence && !loading && <>
         <p className="ve-evidence-caption">{evidence.provenance === 'model' ? t('生成时的画面记录', 'Visual records from generation') : t('回看画面，非生成时依据', 'Review frames, not generation evidence')} · {frameTime(evidence.source_start)}–{frameTime(evidence.source_end)}</p>
         {descriptionChanged && <p className="ve-evidence-caption" role="note">{t('当前文字已修改，请对照原片核对。', 'The draft text has changed. Check it against the source video.')}</p>}
-        <div className="ve-evidence-frames">{evidence.frames.map(frame => <figure key={frame.id}>
+        <div className="ve-evidence-frames">{(showAllFrames ? evidence.frames : evidence.frames.slice(0, 3)).map(frame => <figure key={frame.id}>
           <button type="button" className="ve-evidence-frame" aria-label={t('查看原片 ', 'View source at ') + frameTime(frame.timestamp)} onClick={() => onSeek(frame.timestamp)}><img src={frame.url} alt={t('原片画面 ', 'Source frame ') + frameTime(frame.timestamp)} loading="lazy" /><span>{frameTime(frame.timestamp)}</span></button>
           <button type="button" className="ve-evidence-person" disabled={disabled} onClick={() => onCreateCharacter({ job_id: jobId, segment_index: segmentIndex, frame_id: frame.id, timestamp: frame.timestamp, url: frame.url })}><UserPlus size={12} />{t('添加人物', 'Add character')}</button>
         </figure>)}</div>
+        {evidence.frames.length > 3 && <button type="button" className="ws-text-button" onClick={() => setShowAllFrames(value => !value)}>{showAllFrames ? t('收起其余画面', 'Show fewer frames') : t('查看其余画面 ', 'View remaining frames ') + (evidence.frames.length - 3)}</button>}
+        {evidence.nearby_dialogue && <details className="ve-evidence-caption"><summary>{t('此时已有的原声信息', 'Nearby dialogue context')}</summary>{evidence.nearby_dialogue.length ? evidence.nearby_dialogue.map((cue, index) => <p key={index}>{cue.text}</p>) : <p>{t('此窗口附近没有识别到对白。', 'No dialogue was detected near this window.')}</p>}</details>}
         {evidence.observations.length > 0 ? <ul className="ve-observations">{evidence.observations.map((observation, index) => <li key={index}>{observation.fact}<span>{observation.frame_ids.map(id => evidence.frames.find(frame => frame.id === id)).filter(frame => frame !== undefined).map(frame => <button type="button" key={frame.id} onClick={() => onSeek(frame.timestamp)}>{frameTime(frame.timestamp)}</button>)}</span></li>)}</ul> : <p className="ve-evidence-caption">{t('此版本没有保存逐条画面观察，可对照原片校对。', 'This version has no saved visual observations. Review it against the source video.')}</p>}
         {feedback && <fieldset className="ve-evidence-feedback" disabled={disabled || saving}>
           <legend>{t('标记问题', 'Flag an issue')}</legend>

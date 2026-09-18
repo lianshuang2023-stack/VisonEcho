@@ -28,7 +28,7 @@ GUEST_SECONDS = 60
 GUEST_BYTES = 1024 * 1024 * 1024
 GUEST_OPERATIONS = 5
 GUEST_UPLOADS = 5
-PAID_ROUTE = re.compile(r'^/api/(?:trigger/executions|videos/[^/]+/(?:render|transcript/calibrate|characters/detect))/?$')
+PAID_ROUTE = re.compile(r'^/api/(?:trigger/executions|videos/[^/]+/(?:render|transcript/calibrate|characters/detect|segments/[^/]+/rewrite))/?$')
 
 
 class Credentials(BaseModel):
@@ -128,11 +128,13 @@ class WorkspaceGateway:
         async def private_send(message):
             nonlocal charged
             if message['type'] == 'http.response.start':
+                paid_attempt = any(k.lower() == b'x-visionecho-paid-operation' and v == b'1'
+                                   for k, v in message.get('headers', []))
                 # Never allow a CDN/browser shared cache to serve one user’s
                 # media, frames, exports or JSON to another session.
-                message['headers'] = [(k, v) for k, v in message.get('headers', []) if k.lower() not in (b'cache-control', b'vary')]
+                message['headers'] = [(k, v) for k, v in message.get('headers', []) if k.lower() not in (b'cache-control', b'vary', b'x-visionecho-paid-operation')]
                 message['headers'].extend([(b'cache-control', b'private, no-store'), (b'vary', b'Cookie')])
-                if charged and not 200 <= message['status'] < 300:
+                if charged and not paid_attempt and not 200 <= message['status'] < 300:
                     with store.lock:
                         store.data['guest_paid_operations'] = max(0, store.data.get('guest_paid_operations', 1) - 1)
                         store.save()

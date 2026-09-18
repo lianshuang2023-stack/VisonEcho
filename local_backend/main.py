@@ -40,9 +40,10 @@ class UploadRequest(BaseModel):
 class ExecutionRequest(BaseModel):
     video_id: str
     language: Literal["en-US", "zh-CN"] | None = None
-    dialogue_language: Literal["auto", "en-US", "zh-CN"] | None = None
+    dialogue_language: Literal["auto", "en-US", "zh-CN", "none"] | None = None
     voice: str | None = None
     narration_mode: Literal['auto', 'standard', 'extended'] = 'auto'
+    narration_style: Literal['concise', 'cinematic'] = 'concise'
     detect_characters: bool = Field(default=True, strict=True)
 
 class Store:
@@ -108,6 +109,7 @@ def run_job(store, job_id, video_id, min_gap, source_result=None, edits=None):
                        dialogue_language=job_config.get('dialogue_language', store.settings.dialogue_language),
                        azure_speech_voice=job_config.get('voice', store.settings.azure_speech_voice),
                        narration_mode=job_config.get('narration_mode', 'auto'),
+                       narration_style=job_config.get('narration_style', 'concise'),
                        character_context=copy.deepcopy(job_config.get('character_context', [])),
                        character_library=copy.deepcopy(job_config.get('character_library', [])),
                        detect_characters=bool(job_config.get('detect_characters', False) and source_result is None))
@@ -136,7 +138,7 @@ def run_job(store, job_id, video_id, min_gap, source_result=None, edits=None):
             from .revision import render_revision
             result = render_revision(store.root / 'input' / f'{video_id}.mp4',
                                      store.root / 'runs' / job_id, settings, source_result, edits, update_step)
-        result.update(language=settings.speech_language, dialogue_language=settings.dialogue_language,
+        result.update(language=settings.speech_language, dialogue_language=settings.dialogue_language, narration_style=settings.narration_style,
                       voice=settings.azure_speech_voice, character_context=settings.character_context)
         if job_config.get('source_execution_id'):
             result['source_execution_id'] = job_config['source_execution_id']
@@ -182,11 +184,14 @@ def run_job(store, job_id, video_id, min_gap, source_result=None, edits=None):
     finally:
         store.busy.release()
 
-def enqueue_job(store, background, video_id, min_gap=2, language=None, source_result=None, edits=None, source_execution_id=None, voice=None, narration_mode='auto', dialogue_language=None, detect_characters=False):
+def enqueue_job(store, background, video_id, min_gap=2, language=None, source_result=None, edits=None, source_execution_id=None, voice=None, narration_mode='auto', dialogue_language=None, detect_characters=False, narration_style=None):
     language = language or store.settings.speech_language
+    narration_style = narration_style or (source_result or {}).get('narration_style', 'concise')
+    if narration_style not in ('concise', 'cinematic'):
+        raise HTTPException(400, '请选择简洁或电影感口述风格。')
     dialogue_language = dialogue_language or (source_result or {}).get('dialogue_language') or store.settings.dialogue_language
-    if dialogue_language not in ('auto', 'en-US', 'zh-CN'):
-        raise HTTPException(400, '请选择自动识别、中文或英文对白。')
+    if dialogue_language not in ('auto', 'en-US', 'zh-CN', 'none'):
+        raise HTTPException(400, '请选择自动识别、中文、英文或无对白。')
     try:
         voice = validate_voice(language, voice if voice is not None else (source_result or {}).get('voice'))
     except ValueError as exc:
@@ -215,6 +220,7 @@ def enqueue_job(store, background, video_id, min_gap=2, language=None, source_re
                 'detect_characters': bool(detect_characters and source_result is None),
                 'kind': 'generate' if source_result is None else 'render',
                 'narration_mode': narration_mode,
+                'narration_style': narration_style,
                 'source_execution_id': source_execution_id, 'min_silence_duration': min_gap,
                 'steps': [{'name': name, 'status': 'pending', 'entered_at': None, 'exited_at': None} for name in steps]}
             store.save()
@@ -254,7 +260,7 @@ def create_app(settings=None):
 
     @app.exception_handler(HTTPException)
     async def api_error(request, exc):
-        return JSONResponse({'error': settings.redact(exc.detail)}, status_code=exc.status_code)
+        return JSONResponse({'error': settings.redact(exc.detail)}, status_code=exc.status_code, headers=exc.headers)
 
     @app.get('/api/health')
     def health():
@@ -525,7 +531,7 @@ def create_app(settings=None):
                 raise HTTPException(409, 'Restore the archived video project before processing.')
         return enqueue_job(store, background, payload.video_id, language=payload.language, voice=payload.voice,
                            narration_mode=payload.narration_mode, dialogue_language=payload.dialogue_language,
-                           detect_characters=payload.detect_characters)
+                           detect_characters=payload.detect_characters, narration_style=payload.narration_style)
 
     def get_job(job_id):
         with store.lock:
@@ -555,10 +561,16 @@ def create_app(settings=None):
 
     @app.get('/api/media/output/{job_id}')
     def output_media(job_id: str, download: bool = False):
-        video = store.snapshot('outputs').get(job_id)
-        if not video:
-            raise HTTPException(404, 'Output video not found.')
-        return FileResponse(get_job(job_id)['result']['output_path'], media_type='video/mp4',
+        from .projects import _get_result
+        with store.lock:
+            video = store.data['outputs'].get(job_id)
+            if not video:
+                raise HTTPException(404, 'Output video not found.')
+            _, result, directory = _get_result(store, job_id)
+            path = Path(result.get('output_path') or '').resolve()
+            if not path.is_relative_to(directory) or not path.is_file():
+                raise HTTPException(404, 'Output video file is unavailable.')
+        return FileResponse(path, media_type='video/mp4',
                             filename=video['filename'] if download else None)
 
     @app.get('/api/videos/{job_id}/segments')
@@ -605,6 +617,8 @@ def create_app(settings=None):
     from .evidence import register_evidence_routes
     from .characters import register_character_routes
     from .character_detection import register_character_detection_routes
+    from .review import register_review_routes
+    from .rewrite import register_rewrite_routes
     from .collections import register_collection_routes
     register_collection_routes(app, store, settings)
     register_project_routes(app, store, settings)
@@ -613,4 +627,6 @@ def create_app(settings=None):
     register_evidence_routes(app, store, settings)
     register_character_routes(app, store, settings)
     register_character_detection_routes(app, store, settings)
+    register_review_routes(app, store, settings)
+    register_rewrite_routes(app, store, settings)
     return app

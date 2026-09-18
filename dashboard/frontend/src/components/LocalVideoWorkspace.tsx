@@ -287,11 +287,12 @@ export default function LocalVideoWorkspace() {
 
   return <div className="ws-app ws-workbench ve-atelier">
     <a className="ve-skip-link" href="#visionecho-content">{t("跳到作品内容", "Skip to videos")}</a>
-    <header className="ws-workbench-header"><a href="#" className="ws-brand" onClick={event => { event.preventDefault(); if (!selectedId) goWorks(); }} aria-label="VisionEcho"><span className="ws-brand-mark"><Clapperboard size={23} /></span><span>Vision<span className="ws-brand-light">Echo</span></span></a>
+    <header className="ws-workbench-header"><a href="#about" className="ws-brand" aria-label="VisionEcho" title={t('返回项目介绍', 'About VisionEcho')}><span className="ws-brand-mark"><Clapperboard size={23} /></span><span>Vision<span className="ws-brand-light">Echo</span></span></a>
       <div className="ve-header-controls">
       <button className="ve-preference-button" aria-label={t('切换页面为英文', 'Switch interface to Chinese')} title={t('页面语言，不影响视频配音', 'Interface language only; narration is unchanged')} onClick={() => setLanguage(uiLanguage === 'en' ? 'zh-CN' : 'en')}><Languages size={17} /><span>{uiLanguage === 'en' ? '中文' : 'EN'}</span></button>
       <button className="ve-preference-button ve-theme-toggle" aria-label={theme === 'light' ? t('切换到暗色', 'Switch to dark theme') : t('切换到亮色', 'Switch to light theme')} title={theme === 'light' ? t('暗色模式', 'Dark mode') : t('亮色模式', 'Light mode')} onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>{theme === 'light' ? <Moon size={17} /> : <Sun size={17} />}</button>
       <ActionMenu label={t("工作区菜单", "Workspace menu")} className="ws-workspace-menu" items={[
+        { label: t("项目介绍", "About VisionEcho"), icon: <Clapperboard size={15} />, onSelect: () => { window.location.hash = 'about'; }, disabled: Boolean(showUpload || showProjects || showSettings || nameDialog || moveTarget || deleteTarget || comparisonVideo || restoring) },
         { label: t("项目管理", "Manage projects"), icon: <Folder size={15} />, onSelect: () => setShowProjects(true), disabled: Boolean(selectedId) },
         { label: t("设置", "Settings"), icon: <Settings size={15} />, onSelect: () => setShowSettings(true) },
         { label: t("回收站", "Trash"), icon: <Trash2 size={15} />, onSelect: () => goWorks('trash'), disabled: Boolean(selectedId) },

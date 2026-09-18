@@ -1,0 +1,30 @@
+.lp-timing { padding-block:36px 72px; scroll-margin-top:28px; }
+.lp-timing-topline { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px; margin-bottom:24px; }
+.lp-timing-modes { display:flex; border:1px solid var(--lp-line); border-radius:8px; padding:3px; gap:3px; }
+.lp-timing-modes button { padding:9px 15px; min-height:42px; border:0; border-radius:5px; background:transparent; color:var(--lp-muted); font-size:13px; }
+.lp-timing-modes button[aria-pressed=true] { background:var(--lp-accent); color:var(--lp-on-accent); }
+.lp-timing-example { color:var(--lp-muted); font-size:11px; }
+.lp-timing-diagram { padding:28px 30px 24px; border-block:1px solid var(--lp-line); background:var(--lp-panel); }
+.lp-timing-duration { display:flex; justify-content:flex-end; gap:24px; margin-bottom:25px; color:var(--lp-muted); font-size:12px; }
+.lp-timing-duration strong { color:var(--lp-text); font-weight:550; margin-left:6px; font-variant-numeric:tabular-nums; }
+.lp-timing-lane,.lp-timing-scrub { display:grid; grid-template-columns:78px minmax(0,1fr); gap:16px; align-items:center; }
+.lp-timing-lane + .lp-timing-lane { margin-top:12px; }
+.lp-timing-lane-label,.lp-timing-scrub>label { font-size:12px; color:var(--lp-muted); }
+.lp-timing-track { position:relative; display:flex; height:48px; border:1px solid var(--lp-line); border-radius:5px; }
+.lp-timing-span { display:flex; align-items:center; justify-content:center; min-width:0; text-align:center; font-size:12px; line-height:1.3; padding:3px; color:var(--lp-text); background:var(--lp-bg); }
+.lp-timing-span:first-child { border-radius:4px 0 0 4px; }
+.lp-timing-span + .lp-timing-span { border-left:1px solid var(--lp-line); }
+.lp-timing-span.is-dialogue { background:color-mix(in srgb,var(--lp-accent) 15%,var(--lp-bg)); }
+.lp-timing-span.is-narration { background:var(--lp-accent); color:var(--lp-on-accent); }
+.lp-timing-span.is-pause { background:repeating-linear-gradient(135deg,transparent,transparent 5px,color-mix(in srgb,var(--lp-accent) 10%,transparent) 5px,color-mix(in srgb,var(--lp-accent) 10%,transparent) 6px),var(--lp-bg); font-weight:550; }
+.lp-timing-span.is-ambient { color:var(--lp-muted); background:transparent; font-size:10px; }
+.lp-timing-cursor { position:absolute; top:-5px; bottom:-5px; width:2px; background:var(--lp-text); transform:translateX(-1px); pointer-events:none; box-shadow:0 0 0 1px var(--lp-panel); }
+.lp-timing-cursor::before { content:''; position:absolute; top:-2px; left:-3px; width:8px; height:8px; border-radius:50%; background:var(--lp-text); }
+.lp-timing-scrub { margin-top:22px; }
+.lp-timing-scrub input { display:block; width:100%; height:26px; margin:0; cursor:ew-resize; accent-color:var(--lp-accent); }
+.lp-timing-scrub input:focus-visible { outline:3px solid var(--lp-accent); outline-offset:4px; border-radius:3px; }
+.lp-timing-scale { display:flex; justify-content:space-between; color:var(--lp-muted); font-size:10px; font-variant-numeric:tabular-nums; }
+.lp-timing-position { display:flex; flex-wrap:wrap; gap:24px; margin:20px 0 0 94px; color:var(--lp-muted); font-size:12px; }
+.lp-timing-position output { color:var(--lp-text); margin-left:7px; font-variant-numeric:tabular-nums; font-weight:550; }
+.lp-timing-activity { margin:10px 0 0 94px!important; min-height:1.6em; font-size:13px; color:var(--lp-text); }
+@media(max-width:767px) { .lp-timing { padding-block:12px 46px; } .lp-timing-topline { margin-bottom:18px; } .lp-timing-diagram { padding:22px 16px; } .lp-timing-lane,.lp-timing-scrub { grid-template-columns:1fr; gap:8px; } .lp-timing-lane + .lp-timing-lane { margin-top:16px; } .lp-timing-duration { justify-content:flex-start; margin-bottom:19px; } .lp-timing-track { height:44px; } .lp-timing-span { font-size:11px; } .lp-timing-position { margin-left:0; gap:16px; } .lp-timing-activity { margin-left:0!important; } .lp-timing-modes button { padding-inline:12px; } }

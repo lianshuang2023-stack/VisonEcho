@@ -48,3 +48,18 @@ local_backend/check_*.py
 **/*.sqlite
 **/*.sqlite3
 **/*.db
+
+# Curated introduction demo only. Keep every private case excluded above.
+!dashboard/frontend/public/assets/
+!dashboard/frontend/public/assets/landing/
+!dashboard/frontend/public/assets/landing/lake.webp
+!dashboard/frontend/public/assets/landing/frame-0.webp
+!dashboard/frontend/public/assets/landing/frame-4.webp
+!dashboard/frontend/public/assets/landing/frame-8.webp
+!dashboard/frontend/public/assets/landing/sample-original.mp4
+!dashboard/frontend/public/assets/landing/sample-en.mp4
+!dashboard/frontend/public/assets/landing/sample-zh.mp4
+!dashboard/frontend/public/assets/landing/sample-en.vtt
+!dashboard/frontend/public/assets/landing/sample-zh.vtt
+!dashboard/frontend/public/assets/landing/SOURCE.md
+!dashboard/frontend/public/assets/landing/SOURCE.zh-CN.md

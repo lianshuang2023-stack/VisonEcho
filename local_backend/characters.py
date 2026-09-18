@@ -48,6 +48,8 @@ class CharacterCard(BaseModel):
     id: str = Field(default='', max_length=80, pattern=r'^[A-Za-z0-9_-]*$')
     appearance: str = Field(default='', max_length=600)
     preferred_name: str = Field(default='', max_length=100)
+    before_name: str = Field(default='', max_length=100)
+    name_available_from: float = Field(default=0, ge=0, allow_inf_nan=False, strict=True)
     status: Literal['unconfirmed', 'confirmed', 'recognized'] = 'unconfirmed'
     recognition: CharacterRecognition | None = None
     aliases: list[Annotated[str, Field(min_length=1, max_length=100)]] = Field(default_factory=list, max_length=20)
@@ -165,7 +167,7 @@ def _normalize(payload, current):
             raise HTTPException(422, '人物卡标识不能重复。')
         seen.add(identifier)
         card['id'] = identifier
-        for key in ('appearance', 'preferred_name'):
+        for key in ('appearance', 'preferred_name', 'before_name'):
             card[key] = ' '.join(card[key].split())
         previous_card = existing.get(identifier, {})
         previous_recognition = previous_card.get('recognition')
@@ -215,6 +217,7 @@ def confirmed_character_context(store, video_id):
         source = require_video(store.data, video_id)
         document = _document(source)
         return [{**{key: card[key] for key in ('id', 'appearance', 'preferred_name', 'aliases')},
+                 **({key: card[key] for key in ('before_name', 'name_available_from')} if card['before_name'] or card['name_available_from'] else {}),
                  **({'recognition': card['recognition']} if card['status'] == 'recognized' else {})}
                 for card in document['characters'] if card['status'] in ('confirmed', 'recognized')
                 and card['appearance'].strip() and card['preferred_name'].strip()]
@@ -234,6 +237,9 @@ def register_character_routes(app, store, settings):
             if payload.revision != current['revision']:
                 raise HTTPException(409, '人物卡已在其他窗口修改，请重新加载后保存。')
             saved = _normalize(payload, current)
+            duration = store.data['inputs'][video_id].get('duration')
+            if duration is not None and any(card['name_available_from'] > duration for card in saved['characters']):
+                raise HTTPException(422, '人物称呼的启用时间不能超过原片时长。')
         resolved = _resolve(store, video_id, saved, settings)
         with store.lock:
             source = _require_editable(store, video_id)

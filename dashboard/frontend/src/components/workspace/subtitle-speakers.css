@@ -1,0 +1,7 @@
+.ve-speaker-subtitles>div+div { margin-top:4px; }
+.ve-subtitle-speaker { font-weight:600; }
+.ve-cue-speaker-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin:10px 0 8px; }
+.ve-cue-speaker-row>label { display:flex; align-items:center; gap:8px; color:var(--ws-muted); font-size:12px; }
+.ws-app .ve-cue-speaker-row select { min-height:30px; max-width:200px; padding:4px 9px; border:1px solid var(--ws-line); background:var(--ws-panel); border-radius:6px; font-size:12px; }
+.ve-cue-speaker-row>small { font-size:11px; }
+.ve-dialogue-help { margin:0; padding:0 18px 12px; color:var(--ws-muted); font-size:12px; line-height:1.65; }

@@ -36,9 +36,9 @@ def register_edit_routes(app, store, settings, enqueue):
         with store.lock:
             review = _review_state(store, job_id)
             try:
-                transcript_language = _transcript(store, job_id).get('dialogue_language')
+                transcript_metadata = _transcript(store, job_id)
             except HTTPException:
-                transcript_language = None
+                transcript_metadata = {}
         result = job['result']
         fields = ('segment_index', 'start_time', 'end_time', 'silence_duration',
                   'dvi_text', 'audio_duration', 'pass', 'skip_reason', 'source_start', 'source_end', 'insertion_time', 'character_ids')
@@ -46,13 +46,16 @@ def register_edit_routes(app, store, settings, enqueue):
             'segments': [{key: segment[key] for key in fields if key in segment}
                          for segment in result.get('segments', [])],
             'language': result.get('language', job.get('language', 'en-US')),
-            'dialogue_language': transcript_language or result.get('dialogue_language', job.get('dialogue_language', 'auto')),
+            'dialogue_language': transcript_metadata.get('dialogue_language') or result.get('dialogue_language', job.get('dialogue_language', 'auto')),
+            'dialogue_status': transcript_metadata.get('dialogue_status', result.get('dialogue_status')),
+            'dialogue_reason': transcript_metadata.get('dialogue_reason', result.get('dialogue_reason')),
             'voice': result.get('voice', job.get('voice', 'en-US-JennyNeural')),
             'source_execution_id': job_id,
             'reviewed': review['reviewed'],
             'reviewed_at': review['reviewed_at'],
             'summary': result.get('summary', {}),
             'narration_mode': result.get('narration_mode', 'standard'),
+            'narration_style': result.get('narration_style', 'concise'),
             'outcome': result.get('outcome', 'audio_description' if any(s.get('pass') for s in result.get('segments', [])) else 'subtitles_only'),
             'insertions': result.get('insertions', []),
             'character_detection': result.get('character_detection'),
@@ -120,10 +123,17 @@ def register_edit_routes(app, store, settings, enqueue):
                         'cues': _validate_cues(saved.cues, float(duration)),
                     }
                     for key in ('language', 'dialogue_language'):
-                        if saved_payload.get(key) in ('auto', 'en-US', 'zh-CN'):
+                        if saved_payload.get(key) in ('auto', 'en-US', 'zh-CN', 'none'):
                             source['source_transcript_edits'][key] = saved_payload[key]
-                    if saved_payload.get('dialogue_language') in ('auto', 'en-US', 'zh-CN'):
+                    if saved_payload.get('dialogue_language') in ('auto', 'en-US', 'zh-CN', 'none'):
                         source['dialogue_language'] = saved_payload['dialogue_language']
+                    for key, allowed in (
+                        ('dialogue_status', ('recognized', 'no_speech', 'unrecognized')),
+                        ('dialogue_reason', ('recognized', 'silent_audio', 'no_audio_track', 'speech_not_recognized', 'user_declared_no_dialogue')),
+                    ):
+                        if saved_payload.get(key) in allowed:
+                            source['source_transcript_edits'][key] = saved_payload[key]
+                            source[key] = saved_payload[key]
                     if _transcript_quality(saved_payload):
                         source['source_transcript_edits']['quality'] = _transcript_quality(saved_payload)
                 except (OSError, ValueError, ValidationError):

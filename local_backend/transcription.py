@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import importlib
+from array import array
 from difflib import SequenceMatcher
 import json
 import math
 import re
+import sys
 import threading
 import time
 import unicodedata
@@ -15,12 +17,53 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 
-CUE_FORMAT_VERSION = 2
+CUE_FORMAT_VERSION = 3
 SUPPORTED_LANGUAGES = ("zh-CN", "en-US")
 
 
 class TranscriptionError(ValueError):
     """A transcription failure safe to show after credential redaction."""
+
+
+def _pcm_near_silence(audio_path: Path) -> bool:
+    """Conservatively recognize digital silence, not infer absence of speech.
+
+    Every PCM sample must be within two 16-bit quantization steps of zero. A
+    single louder sample makes this unknown; music and quiet voices are not
+    classified by RMS, an amplitude average, or a fabricated speech detector.
+    """
+    try:
+        with wave.open(str(audio_path), 'rb') as audio:
+            remaining = audio.getnframes()
+            if audio.getnchannels() != 1 or audio.getsampwidth() != 2 or audio.getcomptype() != 'NONE' or remaining <= 0:
+                raise TranscriptionError('Dialogue recognition requires a nonempty 16-bit mono PCM WAV.')
+            while remaining:
+                count = min(65536, remaining)
+                raw = audio.readframes(count)
+                if len(raw) != count * 2:
+                    raise TranscriptionError('The dialogue WAV is truncated; audio cannot be assessed.')
+                samples = array('h', raw)
+                if sys.byteorder != 'little':
+                    samples.byteswap()
+                if any(abs(value) > 2 for value in samples):
+                    return False
+                remaining -= count
+            return True
+    except (OSError, wave.Error, EOFError) as exc:
+        raise TranscriptionError('Cannot read the dialogue WAV for audio assessment.') from exc
+
+
+def _no_match_reason(result) -> str:
+    detail = getattr(result, 'no_match_details', None)
+    value = getattr(detail, 'reason', None)
+    name = getattr(value, 'name', None)
+    if name is None and isinstance(value, str):
+        name = value.rsplit('.', 1)[-1]
+    return {'InitialSilenceTimeout': 'initial_silence_timeout',
+            'EndSilenceTimeout': 'end_silence_timeout',
+            'InitialBabbleTimeout': 'initial_babble_timeout',
+            'NotRecognized': 'speech_not_recognized',
+            'KeywordNotRecognized': 'keyword_not_recognized'}.get(name, 'unknown')
 
 
 def _load_sdk():
@@ -252,6 +295,8 @@ def transcribe_audio(audio_path: Path, settings: Any,
     if not key:
         raise TranscriptionError("Configure the server-side Azure Speech key before transcribing.")
     sdk = _load_sdk()
+    conversation_factory = getattr(getattr(sdk, 'transcription', None), 'ConversationTranscriber', None)
+    diarization_available = callable(conversation_factory)
     config_args = {"subscription": key}
     endpoint = getattr(settings, "azure_speech_endpoint", "").strip()
     if endpoint:
@@ -259,7 +304,7 @@ def transcribe_audio(audio_path: Path, settings: Any,
         if parsed.scheme not in ("https", "wss") or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise TranscriptionError("Azure Speech endpoint must be an HTTPS resource URL without credentials or query parameters.")
         # Continuous language identification requires the universal v2 protocol.
-        speech_path = "/stt/speech/universal/v2" if language == "auto" else "/stt/speech/recognition/conversation/cognitiveservices/v1"
+        speech_path = "/stt/speech/universal/v2" if language == "auto" or diarization_available else "/stt/speech/recognition/conversation/cognitiveservices/v1"
         config_args["endpoint"] = f"wss://{parsed.netloc}{speech_path}"
     else:
         region = getattr(settings, "azure_speech_region", "").strip()
@@ -269,17 +314,20 @@ def transcribe_audio(audio_path: Path, settings: Any,
     done = threading.Event()
     phrases, words, failures = [], [], []
     no_match_count = 0
+    no_match_reasons = []
     seen_results = set()
+    overlapping_utterance_count = 0
     recognizer = None
     timeout = min(900.0, max(60.0, duration * 1.5 + 45.0))
     deadline = time.monotonic() + timeout
 
     def recognized(event):
-        nonlocal no_match_count
+        nonlocal no_match_count, overlapping_utterance_count
         if done.is_set():
             return
         if event.result.reason == sdk.ResultReason.NoMatch:
             no_match_count += 1
+            no_match_reasons.append(_no_match_reason(event.result))
             return
         if event.result.reason != sdk.ResultReason.RecognizedSpeech:
             return
@@ -299,8 +347,24 @@ def transcribe_audio(audio_path: Path, settings: Any,
             if phrase is None:
                 return
             phrase["language"] = detected
-            if words and phrase_words[0]["start"] < words[-1]["end"] - 0.001:
-                raise TranscriptionError("Azure Speech utterance timestamps overlap; subtitles need recalibration.")
+            provider_speaker = getattr(event.result, 'speaker_id', None) if diarization_available else None
+            if (not isinstance(provider_speaker, str) or not provider_speaker.strip()
+                    or len(provider_speaker) > 100 or provider_speaker.strip().casefold() in ('unknown', 'unidentified', 'none')):
+                provider_speaker = None
+            else:
+                provider_speaker = provider_speaker.strip()
+            phrase['_provider_speaker'] = provider_speaker
+            phrase['utterance_id'] = f'utterance-{len(phrases) + 1:04d}'
+            for previous in phrases:
+                if min(phrase['end'], previous['end']) - max(phrase['start'], previous['start']) > .001:
+                    previous_speaker = previous.get('_provider_speaker')
+                    if not provider_speaker or not previous_speaker or provider_speaker == previous_speaker:
+                        raise TranscriptionError('Azure Speech returned overlapping utterances without distinct speakers; subtitles need recalibration.')
+                    phrase['overlap'] = previous['overlap'] = True
+                    overlapping_utterance_count += 1
+            for word in phrase_words:
+                word['utterance_id'] = phrase['utterance_id']
+                word['_provider_speaker'] = provider_speaker
             if result_id:
                 seen_results.add(result_id)
             phrases.append(phrase)
@@ -318,7 +382,7 @@ def transcribe_audio(audio_path: Path, settings: Any,
         # Python SDK sends SpeechRecognitionCanceledEventArgs: details live on
         # result.cancellation_details, rather than necessarily on the event.
         result = getattr(event, "result", None)
-        details = getattr(result, "cancellation_details", None)
+        details = getattr(result, "cancellation_details", None) or getattr(event, 'cancellation_details', None)
         reason = getattr(details, "reason", None) or getattr(event, "reason", None)
         end_of_stream = getattr(sdk.CancellationReason, "EndOfStream", None)
         if reason is None or reason != end_of_stream:
@@ -337,42 +401,72 @@ def transcribe_audio(audio_path: Path, settings: Any,
             config.speech_recognition_language = language
         config.output_format = sdk.OutputFormat.Detailed
         config.request_word_level_timestamps()
-        recognizer = sdk.SpeechRecognizer(speech_config=config, audio_config=sdk.audio.AudioConfig(filename=str(audio_path)),
-                                          **recognizer_args)
-        recognizer.recognized.connect(recognized)
+        factory = conversation_factory if diarization_available else sdk.SpeechRecognizer
+        recognizer = factory(speech_config=config, audio_config=sdk.audio.AudioConfig(filename=str(audio_path)), **recognizer_args)
+        final_signal = recognizer.transcribed if diarization_available else recognizer.recognized
+        final_signal.connect(recognized)
         recognizer.canceled.connect(canceled)
         recognizer.session_stopped.connect(lambda event: done.set())
-        _get_future(recognizer.start_continuous_recognition_async(), min(20, deadline - time.monotonic()))
+        start_recognition = recognizer.start_transcribing_async if diarization_available else recognizer.start_continuous_recognition_async
+        _get_future(start_recognition(), min(20, deadline - time.monotonic()))
         if not done.wait(max(0, deadline - time.monotonic())):
             raise TranscriptionError("Azure Speech transcription timed out. Check connectivity or retry a shorter video.")
         if failures:
             raise TranscriptionError(failures[0])
-        if no_match_count and not words:
-            raise TranscriptionError("Azure Speech detected audio but could not recognize dialogue. Select the correct dialogue language and retry.")
     except Exception as exc:
         raise TranscriptionError(_safe_error(exc, settings)) from None
     finally:
         done.set()
         if recognizer is not None:
             try:
-                _get_future(recognizer.stop_continuous_recognition_async(), 10)
+                stop_recognition = recognizer.stop_transcribing_async if diarization_available else recognizer.stop_continuous_recognition_async
+                _get_future(stop_recognition(), 10)
             except Exception:
                 # Cleanup must not hide the original recognition failure.
                 pass
+    # Provider callbacks can arrive after another speaker's shorter final
+    # result. Number speakers by their first measured utterance, not callback
+    # arrival, and never expose provider IDs or associate them with faces.
+    phrases.sort(key=lambda phrase: (phrase['start'], phrase['end']))
+    words.sort(key=lambda word: (word['start'], word['end']))
+    speaker_map = {}
+    for phrase in phrases:
+        provider_speaker = phrase.pop('_provider_speaker', None)
+        if provider_speaker and provider_speaker not in speaker_map and len(speaker_map) < 100:
+            speaker_map[provider_speaker] = f'speaker_{len(speaker_map) + 1}'
+        phrase['speaker'] = speaker_map.get(provider_speaker)
+    for word in words:
+        word['speaker'] = speaker_map.get(word.pop('_provider_speaker', None))
     language_durations = {}
     for phrase in phrases:
         source_language = phrase["language"]
         language_durations[source_language] = language_durations.get(source_language, 0) + phrase["end"] - phrase["start"]
-    primary_language = max(language_durations, key=language_durations.get) if language_durations else language
+    primary_language = max(language_durations, key=language_durations.get) if language_durations else 'und'
     uncertain = [{"start": phrase["start"], "end": phrase["end"], "confidence": phrase["confidence"]}
                  for phrase in phrases if phrase.get("confidence", 1) < 0.75]
     low_words = sum(word.get("confidence", 1) < 0.75 for word in words)
+    if words:
+        dialogue_status, dialogue_reason = 'recognized', 'recognized'
+        review_required = bool(uncertain or low_words or no_match_count or overlapping_utterance_count)
+    elif _pcm_near_silence(audio_path):
+        dialogue_status, dialogue_reason = 'no_speech', 'silent_audio'
+        review_required = False
+    else:
+        # A completed recognizer with no text is not evidence of no dialogue.
+        # Downstream may preserve the soundtrack and add end-of-video narration
+        # without fabricating word times or placing speech over unknown audio.
+        dialogue_status, dialogue_reason = 'unrecognized', 'speech_not_recognized'
+        review_required = True
     return {"text": _join_text([phrase["text"] for phrase in phrases], primary_language),
-            "words": words, "phrases": phrases, "timing_source": "azure_speech_continuous", "language": primary_language,
-            "quality": {"method": "continuous_word_timestamps", "timing_validated": True,
+            "words": words, "phrases": phrases, "timing_source": "azure_speech_conversation" if diarization_available else "azure_speech_continuous", "language": primary_language,
+            "dialogue_status": dialogue_status, "dialogue_reason": dialogue_reason,
+            "quality": {"method": "conversation_word_timestamps" if diarization_available else "continuous_word_timestamps", "timing_validated": bool(words),
                         "word_count": len(words), "phrase_count": len(phrases), "no_match_count": no_match_count,
                         "low_confidence_word_count": low_words, "low_confidence_phrase_count": len(uncertain),
-                        "review_required": bool(uncertain or low_words or no_match_count), "uncertain_spans": uncertain,
+                        "review_required": review_required, "uncertain_spans": uncertain,
+                        "no_match_reasons": list(dict.fromkeys(no_match_reasons)),
+                        "diarization_available": diarization_available, "speaker_count": len(speaker_map),
+                        "overlapping_utterance_count": overlapping_utterance_count,
                         "requested_language": language, "detected_languages": list(language_durations)}}
 
 
@@ -385,19 +479,31 @@ def transcript_cues(transcript: dict[str, Any], max_seconds: float = 6) -> list[
     cues = []
 
     def append(text, start, end):
+        from .subtitles import normalize_subtitle_text
+        text = normalize_subtitle_text(text)
+        if not text:
+            return
         # Azure offsets are integer 100 ns ticks; do not let floating addition
         # make adjacent cues appear to overlap in the editor's strict check.
         start, end = round(start, 7), round(end, 7)
-        cues.append({"id": f"cue-{len(cues) + 1:04d}", "start": start, "end": end, "text": text})
+        cue = {"id": f"cue-{len(cues) + 1:04d}", "start": start, "end": end, "text": text}
+        if 'speaker' in phrase:
+            cue['speaker'] = phrase['speaker']
+            cue['low_confidence'] = bool(phrase.get('overlap') or phrase.get('confidence', 1) < .75
+                or any(word.get('confidence', 1) < .75 for word in phrase_words
+                       if word['start'] < end and word['end'] > start))
+        cues.append(cue)
 
-    for phrase in transcript.get("phrases", []):
+    for phrase in sorted(transcript.get("phrases", []), key=lambda item: (item.get('start', 0), item.get('end', 0))):
         start, end = _finite(phrase.get("start"), "phrase start"), _finite(phrase.get("end"), "phrase end")
         if start < 0 or end <= start:
             raise TranscriptionError("Subtitle phrases must have positive measured durations.")
         text = str(phrase.get("text") or "").strip()
         if not text:
             continue
-        phrase_words = [word for word in words if word["start"] >= start - 0.001 and word["end"] <= end + 0.001]
+        phrase_words = [word for word in words if word["start"] >= start - 0.001 and word["end"] <= end + 0.001
+                        and (word.get('utterance_id') == phrase['utterance_id'] if phrase.get('utterance_id')
+                             else word.get('speaker') == phrase.get('speaker') if 'speaker' in phrase else True)]
         if not phrase_words:
             if end - start > maximum:
                 raise TranscriptionError("A long subtitle cannot be split without word timestamps.")
@@ -421,4 +527,7 @@ def transcript_cues(transcript: dict[str, Any], max_seconds: float = 6) -> list[
                 chunk = []
             chunk.append(unit)
         flush()
+    cues.sort(key=lambda cue: (cue['start'], cue['end']))
+    for index, cue in enumerate(cues, start=1):
+        cue['id'] = f'cue-{index:04d}'
     return cues

@@ -1,78 +1,103 @@
 # VisionEcho
 
-**口述电影制作工作台**
+**An audio description studio for video.**
 
-VisionEcho 将视频中的画面信息转为口述解说，帮助视障和低视力观众理解人物动作、场景变化与重要视觉细节。创作者可以在一个工作区完成上传、生成、校对、配音和导出。
+**English** · [简体中文](README.zh-CN.md)
 
-## 核心功能
+VisionEcho turns visual information into spoken descriptions so blind and low-vision audiences can follow actions, characters, and scene changes that dialogue alone does not convey. Creators can upload a video, generate a draft, check it against the original, refine the narration, and export the result in one workspace.
 
-- **我的作品**：视频缩略图、项目分类、搜索、状态筛选与最近编辑排序。
-- **对白字幕**：自动识别普通话与英语，使用词级时间戳生成字幕，支持文字和时间校准。
-- **画面解说**：结合镜头切换、多张视频帧和对白上下文生成口述稿，并记录对应画面依据。
-- **画面核对**：逐段查看关键帧与时间点，跳转原片，保存人物、动作和遗漏问题。
-- **人物卡**：自动提取外观、画面和出现段落；明显的影视、动画角色可自动命名并用于解说，其他人物按外观区分。
-- **中英文配音**：解说语言独立于原片对白语言，每种语言提供三种音色。
-- **版本制作**：修改口述稿或音色后重新配音，保留原片、历史版本和已保存字幕。
-- **管理与导出**：项目整理、视频归档、可恢复删除，以及 MP4、SRT、VTT 和 TXT 导出。
-- **界面偏好**：中文 / English 与亮色 / 暗色切换。
+The project is designed for creators, educators, and accessibility teams working on short videos. AI supplies a first draft; visual evidence, character cards, editable subtitles, and version history support human review.
 
-## 制作流程
+## Core features
 
-1. 上传 MP4，选择所属项目或暂不分类。
-2. 设置原片对白语言、解说语言、音色与口述方式。
-3. 生成字幕、画面解说和配音，查看处理进度。
-4. 对照原片校对字幕与口述稿，按需生成新版本。
-5. 导出口述视频、对白字幕和解说稿。
+| Capability | In the studio |
+|---|---|
+| Video library | Real thumbnails, project folders, search, status filters, recent edits, archiving, and a recoverable recycle bin. |
+| Dialogue subtitles | Mandarin and English recognition with measured word timestamps and speaker IDs. Edit text, timing, and speakers; add or remove subtitle lines; rerun recognition for calibration. |
+| Visual description | Draft narration from sampled video frames, scene changes, dialogue context, and established character references. |
+| Visual evidence | Inspect each segment’s keyframes and timestamps, seek to the original video, and record incorrect characters, actions, or missing details. |
+| Character cards | Extract appearances and frame references, confirm names, check related passages, and set when a name may first be used. Distinctive fictional roles can be named automatically when visual evidence supports the match. |
+| Languages and voices | Choose English or Mandarin narration independently of the source dialogue, with three voices per language. |
+| Review and revision | Compare original and described playback, filter review tasks, approve or flag segments, inspect timing issues, and create new voiced versions. |
+| Focused rewriting | Shorten a segment, make it more objective, or add visible atmosphere details. Rewrites first enter the draft for review. |
+| Export | One editor-header menu offers MP4, SRT, VTT, and TXT downloads with format explanations. Approval is optional and does not block saved-file exports. |
+| Introduction and preferences | A bilingual introduction includes an audio-description sample and an interactive timing demonstration. Fresh visits to the introduction start in English; manual language switching works. Light/dark themes and reduced-motion controls are available. |
 
-### 三种口述方式
+Speaker IDs are voice labels, not verified identities. Different speakers’ overlapping subtitles can be displayed together, but fully overlapping speech remains difficult to transcribe accurately. Subtitle display and export remove sentence punctuation while preserving meaningful apostrophes and numeric formatting; narration punctuation is unchanged.
 
-| 模式 | 插入方式 | 视频时长 |
+## Workflow
+
+1. **Prepare:** upload an MP4 and optionally choose or create a project folder.
+2. **Generate:** select dialogue language, narration language, voice, and timing mode. Progress appears beside the player.
+3. **Review:** compare the original and described versions, check visual evidence and names, and edit subtitles or narration. Revoicing creates a new version.
+4. **Export:** open **Export** and choose a format. Downloads use the saved version and exclude unsaved edits.
+
+The player and timeline stay beside the active task. Version selection stays near the title; character resources, renaming, and new-version settings are available through **Project options**. Click the VisionEcho brand to return to the introduction.
+
+### Narration timing modes
+
+| Mode | How narration is inserted | Resulting duration |
 |---|---|---|
-| 自动 | 优先使用自然对白间隙；没有足够间隙时切换扩展口述 | 视处理结果而定 |
-| 自然间隙 | 仅在无对白的时间窗口插入解说；没有合适窗口时可能只生成字幕 | 保持原时长 |
-| 扩展口述 | 在对白边界暂停画面，播放解说后继续 | 增加解说播放时间 |
+| Auto | Uses natural dialogue gaps first; switches to extended narration when suitable gaps are unavailable or eligible drafts need more time. | May increase. |
+| Natural gaps | Uses available gaps without extending the source. Videos without suitable gaps may produce subtitles only. | Original duration. |
+| Extended narration | Pauses the picture at planned insertion points, plays the description, then resumes the source. | Increases by the inserted narration. |
 
-### 语言与音色
+For music-only or ambient videos, select **No dialogue** to skip transcription. Missing audio tracks and detected silence also have explicit skip reasons. Sound without reliably recognized dialogue is not treated as confirmed silence: Auto and Extended modes place supplementary narration after the original audio, while Natural gaps mode preserves the source without inserting narration.
 
-| 设置 | 选项 |
+Drafts that cannot fit their narration window are retained with a reason for review; they are not truncated or mixed over dialogue. Unvoiced segments are excluded from the narration track and TXT export.
+
+### Languages and voices
+
+| Setting | Choices |
 |---|---|
-| 原片对白语言 | 自动识别、中文普通话、英语 |
-| 中文解说音色 | 晓晓、云希、晓伊 |
-| 英文解说音色 | Jenny、Guy、Aria |
+| Source dialogue | Auto detection between Mandarin and English; Mandarin; English; no dialogue. |
+| Mandarin narration | Xiaoxiao, Yunxi, Xiaoyi. |
+| English narration | Jenny, Guy, Aria. |
 
-对白字幕保留原声语言；解说可以另选中文或英文。页面语言切换只影响界面。
+Subtitles remain in the source language. Choosing another narration language does not translate dialogue subtitles. Interface language is a separate setting.
 
-## 技术方案
+### Export formats
 
-| 层级 | 实现 |
+| Format | Contents |
 |---|---|
-| 前端 | React 19、TypeScript、Vite、Tailwind CSS |
-| 后端 | Python 3.12、FastAPI |
-| 画面理解与口述稿 | Azure OpenAI 多模态部署，默认部署名为 `gpt-5.6-terra` |
-| 对白识别 | Azure Speech SDK 连续识别、语言检测与词级时间戳 |
-| 解说配音 | Azure Speech Neural TTS |
-| 媒体处理 | FFmpeg / FFprobe：探测、抽帧、音频处理、混音与导出 |
-| 数据保存 | 本地文件与 JSON 索引，按作品和生成版本保存 |
+| MP4 | Saved video with original audio and the narration successfully generated for that version. |
+| SRT | Dialogue subtitles with timecodes for common players and editing tools. |
+| VTT | Dialogue captions with timecodes for web and HTML5 video. |
+| TXT | Successfully voiced narration segments with time ranges. |
+
+Subtitles are separate files and are not burned into the MP4. Review labels help with checking; they do not certify accuracy or restrict downloading an existing result.
+
+## Architecture
+
+| Layer | Implementation |
+|---|---|
+| Frontend | React 19, TypeScript, Vite 8, Fluent UI React, and Tailwind CSS. |
+| Backend | Python 3.12 and FastAPI. |
+| Visual understanding | A configurable Azure OpenAI multimodal deployment. The example deployment name is `gpt-5.6-terra`; it must match an available deployment in your Azure resource. |
+| Dialogue recognition | Azure Speech SDK `ConversationTranscriber` for speaker labels and word timestamps; continuous `SpeechRecognizer` fallback when that SDK capability is unavailable. |
+| Narration synthesis | Azure Speech Neural TTS. |
+| Media processing | FFmpeg / FFprobe for probing, frame extraction, audio preparation, timing, mixing, and MP4 export. |
+| Storage | Media and JSON workspace indexes on the backend machine; SQLite for hosted accounts and sessions. |
 
 ```mermaid
 flowchart LR
-    A[上传视频] --> B[本地媒体处理]
-    B --> C[Azure Speech 对白识别]
-    B --> D[视频抽帧]
-    C --> E[字幕与解说时间窗口]
-    D --> F[Azure OpenAI 画面理解]
-    E --> F
-    F --> G[口述稿]
-    G --> H[Azure Speech 配音]
-    H --> I[FFmpeg 合成视频]
-    I --> J[预览、校对与导出]
+    A[Upload video] --> B[FFmpeg / FFprobe]
+    B --> C[Audio]
+    B --> D[Video frames]
+    C --> E[Azure Speech transcription]
+    E --> F[Subtitles and narration windows]
+    D --> G[Azure OpenAI visual description]
+    F --> G
+    H[Character references] --> G
+    G --> I[Narration draft]
+    I --> J[Azure Speech TTS]
+    J --> K[FFmpeg video export]
+    K --> L[Preview, review, and download]
 ```
 
-原始视频、编辑和生成版本保存在当前设备。处理时，提取的音频与画面会发送至已配置的 Azure 服务；密钥仅由后端读取。
+## Run locally
 
-## 本地启动
-
-准备 Python 3.12、Node.js 22 / 24 LTS、FFmpeg / FFprobe，以及可用的 Azure OpenAI 和 Azure Speech 资源。
+Install Python 3.12, Node.js 22 or 24 LTS, and FFmpeg / FFprobe. Generation requires accessible Azure OpenAI and Azure Speech resources.
 
 ```bash
 git clone https://github.com/lianshuang2023-stack/VisonEcho.git
@@ -84,53 +109,82 @@ cp .env.azure.example .env.local
 chmod 600 .env.local
 ```
 
-在 `.env.local` 中填写后端配置：
+Set these backend-only values in `.env.local`:
 
-- `AZURE_OPENAI_ENDPOINT`、`AZURE_OPENAI_API_KEY`、`AZURE_OPENAI_DEPLOYMENT`。
-- `AZURE_SPEECH_KEY`，以及 `AZURE_SPEECH_ENDPOINT` 或 `AZURE_SPEECH_REGION`。
-- 根据需要调整默认语言、音色与上传限制。
+- `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, and `AZURE_OPENAI_DEPLOYMENT`.
+- `AZURE_SPEECH_KEY`, plus `AZURE_SPEECH_ENDPOINT` or `AZURE_SPEECH_REGION`.
+- Optional language defaults, media-tool paths, and upload limits from the template.
 
-完成后启动：
+Start both services:
 
 ```bash
 ./run-local.sh
 ```
 
-- 工作台：[http://127.0.0.1:5174/](http://127.0.0.1:5174/)
-- API 文档：[http://127.0.0.1:8000/api/docs](http://127.0.0.1:8000/api/docs)
+- Website: [http://127.0.0.1:5174/](http://127.0.0.1:5174/)
+- API documentation: [http://127.0.0.1:8000/api/docs](http://127.0.0.1:8000/api/docs)
 
-服务仅监听本机。详细配置与操作见[本地运行说明](RUN-LOCAL.zh-CN.md)。
+Both services bind to the local machine. See the [local usage guide](RUN-LOCAL.md) for configuration, editing, and troubleshooting.
 
-托管模式支持登录或免注册试用，各自作品独立，现有本机案例不导入线上。部署步骤与边界见[登录、试用与数据隔离](DEPLOYMENT-PRIVACY.zh-CN.md)。
+## Hosted access and privacy
 
-## 代码导航
+Local mode stores work in the backend’s `.local-data/`. Hosted mode uses separate account or guest workspaces in `HOSTED_DATA_DIR` and does not import the maintainer’s local cases. The introduction and illustrative sample are public; workspace media requires the corresponding session.
 
-| 路径 | 职责 |
+Hosted guest trials currently allow up to **5 uploads**, **1 GiB (shown as 1 GB) and 60 seconds per video**, and **5 shared AI operations**. Generation, revoicing, subtitle calibration, character detection, and segment rewriting share that allowance. Guest sessions last 24 hours; registering within a valid guest session preserves that workspace. Account passwords are 12–24 characters.
+
+Original videos and results stay on the backend’s storage. Extracted audio, selected frames, and relevant text are sent to the configured Azure services for AI processing. Credentials are read only by the backend and must not be placed in `VITE_*` variables or committed to Git. Azure services incur usage charges.
+
+See the [access and data-isolation guide](DEPLOYMENT-PRIVACY.md) and [Linux deployment guide](deploy/README.md). The repository includes a Docker/Caddy setup; deployment still requires a configured server, persistent storage, and a suitable HTTPS entry point.
+
+## Current scope and limitations
+
+- Local defaults accept MP4 videos up to 500 MiB and 10 minutes; server configuration can change these limits. Hosted guest limits are separate.
+- The backend supports one media-processing task at a time and one application process. It is intended for small-scale use, not a multi-worker production queue.
+- Recognition can miss or misattribute noisy, overlapping, or unclear dialogue. Word timing comes from the service; missing reliable timing is not replaced with invented timestamps.
+- Frame sampling can miss brief actions. Character matches and descriptions can be wrong; review the source before publishing. Automatic naming covers distinctive fictional roles, not identification of real people from faces.
+- Guest expiry prevents further session access but does not automatically delete media. Hosted retention, backups, and overall Azure spending limits require operator configuration.
+- Account recovery, email verification, and multi-factor authentication are not implemented.
+
+## Development and verification
+
+| Location | Responsibility |
 |---|---|
-| `dashboard/frontend/src/components/LocalVideoWorkspace.tsx` | 作品首页、项目管理与回收站 |
-| `dashboard/frontend/src/components/workspace/` | 制作编辑器、对比预览与时间轴 |
-| `local_backend/main.py` | API、上传、任务调度与本地存储 |
-| `local_backend/pipeline.py` | 视频生成流程 |
-| `local_backend/transcription.py` | 对白识别与字幕排版 |
-| `local_backend/calibration.py` | 字幕重新校准 |
-| `local_backend/revision.py`、`local_backend/extended.py` | 版本重配音与扩展口述导出 |
-| `run-local.sh` | 启动本地前后端 |
+| `dashboard/frontend/src/components/LandingPage.tsx` | Introduction, public sample, and studio entry. |
+| `dashboard/frontend/src/components/LocalVideoWorkspace.tsx` | Library, projects, upload, and recycle bin. |
+| `dashboard/frontend/src/components/workspace/` | Studio, evidence, characters, comparison, review, and exports. |
+| `local_backend/main.py` | Local API, uploads, task dispatch, and storage. |
+| `local_backend/pipeline.py` | Generation pipeline. |
+| `local_backend/transcription.py`, `subtitles.py`, `calibration.py` | Recognition, subtitle presentation, and recalibration. |
+| `local_backend/review.py`, `rewrite.py` | Segment checks, saved review state, and focused rewrites. |
+| `local_backend/characters.py`, `character_detection.py` | Character cards and automatic extraction. |
+| `local_backend/revision.py`, `extended.py` | Revoicing and extended-narration rendering. |
+| `local_backend/access.py`, `hosted.py` | Hosted identities, sessions, and workspace isolation. |
+| `deploy/` | Linux deployment configuration. |
 
-前端结构详见[开发说明](dashboard/frontend/FRONTEND.md)。
-
-## 验证
+Run these checks from the repository root:
 
 ```bash
 .venv/bin/python -m pytest local_backend -q
+npm --prefix dashboard/frontend test
 npm --prefix dashboard/frontend run build
-cd dashboard/frontend
-./node_modules/.bin/vitest run
+npm --prefix dashboard/frontend run lint
 ```
 
-## 使用范围
+The automated suite uses synthetic media and mocked service responses. It checks behavior rather than guaranteeing recognition quality on every video. The separate `local_backend.check_quality_smoke` script makes live Azure calls when explicitly run and incurs usage. Frontend details are in the [frontend guide](dashboard/frontend/FRONTEND.md).
 
-默认支持不超过 500 MB、10 分钟的 MP4，一次处理一个生成或校准任务。字幕为独立文件，未烧录进视频。生成内容需结合原片校对，当前已知问题见[运行说明](RUN-LOCAL.zh-CN.md#当前已知限制)。Azure 服务按实际用量计费。
+## Documentation
 
-## 许可证
+| Guide | English | 简体中文 |
+|---|---|---|
+| Project overview | [README](README.md) | [项目介绍](README.zh-CN.md) |
+| Local use | [Run locally](RUN-LOCAL.md) | [本地运行](RUN-LOCAL.zh-CN.md) |
+| Hosted access | [Access and privacy](DEPLOYMENT-PRIVACY.md) | [登录、试用与数据隔离](DEPLOYMENT-PRIVACY.zh-CN.md) |
+| Server deployment | [Linux deployment](deploy/README.md) | [Linux 服务器部署](deploy/README.zh-CN.md) |
+| Frontend development | [Frontend guide](dashboard/frontend/FRONTEND.md) | [前端开发说明](dashboard/frontend/FRONTEND.zh-CN.md) |
+| Contributing | [Contributing](CONTRIBUTING.md) | [参与项目](CONTRIBUTING.zh-CN.md) |
+| Community | [Code of conduct](CODE_OF_CONDUCT.md) | [协作约定](CODE_OF_CONDUCT.zh-CN.md) |
+| Demo provenance | [Sample source](dashboard/frontend/public/assets/landing/SOURCE.md) | [示例来源](dashboard/frontend/public/assets/landing/SOURCE.zh-CN.md) |
 
-[MIT-0](LICENSE)
+## License
+
+[MIT-0](LICENSE). See [NOTICE](NOTICE) for the repository’s notices.

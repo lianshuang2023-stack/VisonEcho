@@ -258,11 +258,25 @@ def _resolve_evidence(store, job_id, index, settings):
         # The original may have been trashed while a local thumbnail was made.
         latest, _ = _job(store, job_id, index)
         feedback = _feedback(latest, index)
+        from .projects import _transcript
+        from .timeline import cues_to_source
+        try:
+            transcript = _transcript(store, job_id)
+            source_cues = cues_to_source(transcript['cues'], current['result'].get('insertions', []))
+        except HTTPException:
+            source_cues = []
+        nearby_dialogue = [{'start': cue['start'], 'end': cue['end'], 'text': str(cue['text'])[:2000]}
+                           for cue in source_cues if cue['end'] >= max(0, bounds[0] - 6)
+                           and cue['end'] <= bounds[1]][-8:]
     document = {'segment_index': index, 'source_start': bounds[0], 'source_end': bounds[1],
                 'provenance': provenance, 'frames': [
                     {'id': frame['id'], 'timestamp': frame['timestamp'],
                      'url': f'/api/videos/{job_id}/segments/{index}/frames/{frame["id"]}'}
                     for frame in frames], 'observations': observations, 'feedback': feedback}
+    document.update(
+        generation_reason='visual_context' if provenance == 'model' else 'review_reference',
+        window_reason='extended_pause' if current['result'].get('narration_mode') == 'extended' else 'dialogue_gap',
+        nearby_dialogue=nearby_dialogue)
     return document, {frame['id']: frame['path'] for frame in frames}
 
 

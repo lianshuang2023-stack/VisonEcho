@@ -35,6 +35,15 @@ async function open() {
 }
 
 describe('ComparisonPreview', () => {
+  it('displays every simultaneous speaker in the active dialogue panel', async () => {
+    mocks.getTranscript.mockResolvedValue({ revision: 0, cues: [{ ...cue, speaker: 'speaker_1' }, { id: 'cue-2', start: 2, end: 4, text: '欢迎回来', speaker: 'speaker_2' }] });
+    const { player, container } = await open();
+    player.currentTime = 2.5; fireEvent.timeUpdate(player);
+    const active = container.querySelector('.ve-comparison-text-cue.original')!;
+    expect(active).toHaveTextContent('说话人 1: 你好，大海。');
+    expect(active).toHaveTextContent('说话人 2: 欢迎回来');
+    expect(active.querySelectorAll('p')).toHaveLength(2);
+  });
   it('loads the latest saved version and maps only real recorded speech to the timeline', async () => {
     const { player } = await open();
     expect(mocks.fetchInputVideoUrl).toHaveBeenCalledWith(video.video_id);

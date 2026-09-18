@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import LocalVideoWorkspace from '../LocalVideoWorkspace';
+import AccessGate from '../AccessGate';
 import ProjectStudio from '../workspace/ProjectStudio';
+import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { AccessSessionContext } from '../../accessSession';
 import type { ProjectCollection, ProjectDetail, VideoProject } from '../../localWorkspaceApi';
 
-const mocks = vi.hoisted(() => ({ fetchBackendHealth: vi.fn(), fetchInputVideoUrl: vi.fn(), fetchExecutionStatus: vi.fn(), uploadVideo: vi.fn(), listProjects: vi.fn(), listHistoryVideos: vi.fn(), listCollections: vi.fn(), createCollection: vi.fn(), renameCollection: vi.fn(), deleteCollection: vi.fn(), deleteVideo: vi.fn(), listTrash: vi.fn(), restoreCollection: vi.fn(), restoreVideo: vi.fn(), patchProject: vi.fn(), getProject: vi.fn(), getNarration: vi.fn(), getTranscript: vi.fn(), saveTranscript: vi.fn(), generateNarration: vi.fn(), renderNarration: vi.fn(), calibrateTranscript: vi.fn(), getTranscriptCalibration: vi.fn(), setVideoReview: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getSegmentEvidence: vi.fn(), saveEvidenceFeedback: vi.fn(), getCharacters: vi.fn(), getLatestCharacterDetection: vi.fn(), getCharacterDetection: vi.fn(), detectCharacters: vi.fn(), getStudioReview: vi.fn(), updateStudioReview: vi.fn(), rewriteSegment: vi.fn(), fetchBackendHealth: vi.fn(), fetchInputVideoUrl: vi.fn(), fetchExecutionStatus: vi.fn(), uploadVideo: vi.fn(), listProjects: vi.fn(), listHistoryVideos: vi.fn(), listCollections: vi.fn(), createCollection: vi.fn(), renameCollection: vi.fn(), deleteCollection: vi.fn(), deleteVideo: vi.fn(), listTrash: vi.fn(), restoreCollection: vi.fn(), restoreVideo: vi.fn(), patchProject: vi.fn(), getProject: vi.fn(), getNarration: vi.fn(), getTranscript: vi.fn(), saveTranscript: vi.fn(), generateNarration: vi.fn(), renderNarration: vi.fn(), calibrateTranscript: vi.fn(), getTranscriptCalibration: vi.fn(), setVideoReview: vi.fn() }));
 vi.mock('../../api', () => mocks);
 vi.mock('../../localWorkspaceApi', async importOriginal => ({ ...await importOriginal<typeof import('../../localWorkspaceApi')>(), ...mocks }));
 const project: VideoProject = { video_id: 'video-1', collection_id: 'default', title: '海边的一天', filename: 'coast.mp4', duration: 30, size_mb: 1.2, status: 'ready', archived: false, execution_count: 2, created_at: '2026-09-16T00:00:00Z', updated_at: '2026-09-16T00:00:00Z', last_modified: '2026-09-16T00:00:00Z', latest_execution_id: 'job-2', latest_result_id: 'job-2', thumbnail_url: '/thumbnail' };
@@ -14,6 +16,14 @@ const detail: ProjectDetail = { project, latest_result_id: 'job-2', executions: 
 const segment = { segment_index: 0, start_time: 5, end_time: 10, silence_duration: 5, dvi_text: 'A wave reaches the shore.', audio_duration: 3, pass: true };
 const transcript = { revision: 0, cues: [{ id: 'cue-1', start: 1, end: 3, text: 'Hello, ocean.' }] };
 beforeEach(() => {
+  window.history.replaceState(null, '', '/#visionecho-content');
+  vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+  mocks.getStudioReview.mockResolvedValue({ revision: 0, transcript_revision: 0, segments: [{ segment_index: 0, state: 'draft', text: 'A wave reaches the shore.', available_seconds: 5, speech_seconds: 3, timing_source: 'measured', margin_seconds: 2, risks: [], high_risk: false }], counts: { total: 1, pending: 1, approved: 0, conflicts: 0, uncertain: 0 }, can_export: false, blockers: ['not_approved'] });
+  mocks.updateStudioReview.mockResolvedValue({ revision: 1, transcript_revision: 0, segments: [{ segment_index: 0, state: 'approved', text: 'A wave reaches the shore.', available_seconds: 5, speech_seconds: 3, timing_source: 'measured', margin_seconds: 2, risks: [], high_risk: false }], counts: { total: 1, pending: 0, approved: 1, conflicts: 0, uncertain: 0 }, can_export: true, blockers: [] });
+  mocks.getSegmentEvidence.mockResolvedValue({ segment_index: 0, source_start: 5, source_end: 10, provenance: 'model', frames: [], observations: [], feedback: { revision: 0, issues: [], note: '' } });
+  mocks.getCharacters.mockResolvedValue({ revision: 0, characters: [] });
+
   mocks.fetchBackendHealth.mockResolvedValue({ status: 'ok', provider: 'azure', configured: true, speech_region_configured: true, issues: [], model: 'test-model' });
   mocks.listCollections.mockResolvedValue([collection]);
   mocks.listTrash.mockResolvedValue({ collections: [], videos: [] });
@@ -25,10 +35,97 @@ beforeEach(() => {
   mocks.getTranscript.mockResolvedValue(transcript);
   mocks.fetchExecutionStatus.mockResolvedValue({ ...detail.executions[0], execution_arn: 'job-new', status: 'FAILED', cause: 'Speech service unavailable' });
 });
-afterEach(() => { cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); vi.useRealTimers(); });
-const studio = () => render(<ProjectStudio projectId="video-1" processingReady onBack={vi.fn()} onSetup={vi.fn()} />);
+afterEach(() => { cleanup(); window.history.replaceState(null, '', '/'); vi.resetAllMocks(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+const studio = () => render(<FluentProvider theme={webLightTheme}><ProjectStudio projectId="video-1" processingReady onBack={vi.fn()} onSetup={vi.fn()} /></FluentProvider>);
+
+async function chooseProjectOption(name: string) {
+  fireEvent.click(await screen.findByRole('button', { name: '项目选项' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name }));
+}
 
 describe('local video workspace', () => {
+  it('returns to the real overview from the brand or workspace menu without losing the active narration draft', async () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ mode: 'local', user: null, limits: { max_video_seconds: 600, max_upload_mb: 500 } }) }));
+    render(<FluentProvider theme={webLightTheme}><AccessGate><LocalVideoWorkspace /></AccessGate></FluentProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: '继续编辑：海边的一天' }));
+    const draft = await screen.findByRole('textbox', { name: '口述稿 1' });
+    fireEvent.change(draft, { target: { value: 'Preserve this narration draft while viewing the overview.' } });
+    const brand = screen.getByRole('link', { name: 'VisionEcho' });
+    expect(brand).toHaveAttribute('href', '#about');
+    fireEvent.click(brand);
+    expect(await screen.findByRole('heading', { name: '让画面被听见。' })).toBeVisible();
+    expect(window.location.hash).toBe('#about');
+    expect(draft).not.toBeVisible();
+    expect(pause).toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: '有未保存的编辑' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: '进入工作区' })[0]);
+    expect(await screen.findByRole('textbox', { name: '口述稿 1' })).toBe(draft);
+    expect(draft).toHaveValue('Preserve this narration draft while viewing the overview.');
+    expect(screen.getByRole('heading', { name: '海边的一天' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '工作区菜单' }));
+    const about = screen.getByRole('menuitem', { name: '项目介绍' });
+    expect(about).toBeEnabled();
+    fireEvent.click(about);
+    expect(await screen.findByRole('heading', { name: '让画面被听见。' })).toBeVisible();
+    fireEvent.click(screen.getAllByRole('button', { name: '进入工作区' })[0]);
+    expect(await screen.findByRole('textbox', { name: '口述稿 1' })).toBe(draft);
+    expect(draft).toHaveValue('Preserve this narration draft while viewing the overview.');
+    expect(mocks.getProject).toHaveBeenCalledOnce();
+    expect(mocks.renderNarration).not.toHaveBeenCalled();
+    expect(mocks.saveTranscript).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it('closes project resources without discarding unrelated narration edits', async () => {
+    mocks.getLatestCharacterDetection.mockResolvedValue(null);
+    studio();
+    const text = await screen.findByRole('textbox', { name: '口述稿 1' });
+    fireEvent.change(text, { target: { value: 'Keep this narration draft.' } });
+    await chooseProjectOption('项目资源');
+    fireEvent.click(await screen.findByRole('button', { name: '关闭项目资源' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '关闭项目资源' })).not.toBeInTheDocument());
+    expect(screen.queryByRole('dialog', { name: '有未保存的编辑' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('textbox', { name: '口述稿 1' })).toHaveValue('Keep this narration draft.');
+  });
+
+  it('keeps a character draft when the resource drawer is closed and reopened', async () => {
+    // Tabster checks layout visibility; jsdom reports offsetParent=null for all elements.
+    vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockImplementation(function(this: HTMLElement) { return this.closest('[hidden]') ? null : this.parentElement; });
+    vi.spyOn(document.body, 'getBoundingClientRect').mockReturnValue({ width: 1200, height: 800, top: 0, bottom: 800, left: 0, right: 1200, x: 0, y: 0, toJSON: () => ({}) });
+    mocks.getLatestCharacterDetection.mockResolvedValue(null);
+    mocks.getCharacters.mockResolvedValue({ revision: 1, characters: [{ id: 'person-1', appearance: 'A red coat', preferred_name: 'Ann', status: 'confirmed', aliases: [], thumbnail: null, occurrences: [] }] });
+    studio();
+    await screen.findByRole('textbox', { name: '口述稿 1' });
+    await chooseProjectOption('项目资源');
+    const closeResources = await screen.findByRole('button', { name: '关闭项目资源' });
+    await waitFor(() => expect(mocks.getCharacters).toHaveBeenCalledWith('video-1'));
+    fireEvent.click(await screen.findByRole('button', { name: '编辑人物 Ann' }, { timeout: 3000 }));
+    fireEvent.change(screen.getByRole('textbox', { name: '人物统一称呼' }), { target: { value: 'Alice' } });
+    fireEvent.click(closeResources);
+    await waitFor(() => expect(screen.queryByRole('button', { name: '关闭项目资源' })).not.toBeInTheDocument());
+    expect(screen.queryByRole('dialog', { name: '有未保存的编辑' })).not.toBeInTheDocument();
+    await chooseProjectOption('项目资源');
+    expect(await screen.findByRole('textbox', { name: '人物统一称呼' })).toHaveValue('Alice');
+  });
+
+  it('closes resources while an existing character task continues without starting another task', async () => {
+    mocks.getLatestCharacterDetection.mockResolvedValue({ detection_id: 'detect-1', job_id: 'job-2', status: 'RUNNING' });
+    let complete!: (result: { detection_id: string; job_id: string; status: string; added_count: number }) => void;
+    mocks.getCharacterDetection.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+    studio();
+    await screen.findByRole('textbox', { name: '口述稿 1' });
+    await chooseProjectOption('项目资源');
+    await screen.findByText('正在分析画面中的人物外观…');
+    expect(screen.getByRole('button', { name: '关闭项目资源' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: '关闭项目资源' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '关闭项目资源' })).not.toBeInTheDocument());
+    await waitFor(() => expect(mocks.getCharacterDetection).toHaveBeenCalledWith('detect-1'), { timeout: 2500 });
+    await act(async () => complete({ detection_id: 'detect-1', job_id: 'job-2', status: 'SUCCEEDED', added_count: 0 }));
+    fireEvent.click(await screen.findByRole('button', { name: '项目选项' }));
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: '生成新版本' })).toBeEnabled());
+    expect(mocks.detectCharacters).not.toHaveBeenCalled();
+  });
   it('displays the server-provided guest file limit and remaining AI operations', async () => {
     const session = { mode: 'hosted' as const, user: { id: 'trial-1', kind: 'guest' as const, username: null, expires_at: '2026-09-20T00:00:00Z' }, limits: { max_video_seconds: 60, max_upload_mb: 1024, guest_generations_remaining: 5 } };
     const view = render(<AccessSessionContext.Provider value={{ session, busy: false, openAccess: vi.fn(), refresh: async () => {} }}><LocalVideoWorkspace /></AccessSessionContext.Provider>);
@@ -299,6 +396,7 @@ describe('local video workspace', () => {
   it('requires an explicit confirmation before paid generation', async () => {
     studio();
     await screen.findByRole('textbox', { name: '口述稿 1' });
+    await chooseProjectOption('生成新版本');
     fireEvent.click(screen.getByRole('button', { name: '生成一个新版本' }));
     expect(screen.getByRole('dialog', { name: '开始生成口述解说' })).toBeVisible();
     expect(mocks.generateNarration).not.toHaveBeenCalled();
@@ -311,12 +409,13 @@ describe('local video workspace', () => {
     studio();
     await screen.findByRole('textbox', { name: '口述稿 1' });
     expect(screen.queryByText('最短无对白窗口')).not.toBeInTheDocument();
+    await chooseProjectOption('生成新版本');
     fireEvent.change(screen.getByRole('combobox', { name: '解说语言' }), { target: { value: 'zh-CN' } });
     expect(screen.getByRole('combobox', { name: '原片对白语言' })).toHaveValue('auto');
     const voice = screen.getByRole('combobox', { name: '新版本解说音色' });
     expect(voice).toHaveValue('zh-CN-XiaoxiaoNeural');
-    expect(screen.getByRole('combobox', { name: '此版本配音音色' })).toHaveValue('en-US-JennyNeural');
-    expect(screen.getByRole('button', { name: '重新配音并导出' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: '此版本配音音色', hidden: true })).toHaveValue('en-US-JennyNeural');
+    expect(screen.getByRole('button', { name: '重新配音并保存新版本', hidden: true })).toBeDisabled();
     fireEvent.change(voice, { target: { value: 'zh-CN-YunxiNeural' } });
     fireEvent.click(screen.getByRole('button', { name: '生成一个新版本' }));
     mocks.generateNarration.mockResolvedValue({ execution_arn: 'job-new', start_date: '2026-09-16T00:00:00Z' });
@@ -330,13 +429,13 @@ describe('local video workspace', () => {
     fireEvent.change(screen.getByRole('combobox', { name: '此版本配音音色' }), { target: { value: 'en-US-GuyNeural' } });
     expect(screen.getByText('未保存')).toBeVisible();
     mocks.renderNarration.mockRejectedValueOnce(new Error('Speech request failed'));
-    fireEvent.click(screen.getByRole('button', { name: '重新配音并导出' }));
+    fireEvent.click(screen.getByRole('button', { name: '重新配音并保存新版本' }));
     fireEvent.click(screen.getByRole('button', { name: '确认并开始' }));
     expect(await screen.findByText('Speech request failed')).toBeVisible();
     expect(mocks.renderNarration).toHaveBeenCalledWith('job-2', [segment], 'en-US-GuyNeural');
     expect(field).toHaveValue(segment.dvi_text);
     expect(screen.getByRole('combobox', { name: '此版本配音音色' })).toHaveValue('en-US-GuyNeural');
-    expect(screen.getByRole('button', { name: '重新配音并导出' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '重新配音并保存新版本' })).toBeEnabled();
     fireEvent.change(screen.getByRole('combobox', { name: '选择历史版本' }), { target: { value: 'job-1' } });
     expect(screen.getByRole('dialog', { name: '有未保存的编辑' })).toBeVisible();
   });
@@ -344,8 +443,10 @@ describe('local video workspace', () => {
   it('calibrates saved subtitles in the selected language without replacing the video version', async () => {
     studio();
     await screen.findByRole('textbox', { name: '口述稿 1' });
+    await chooseProjectOption('生成新版本');
     fireEvent.change(screen.getByRole('combobox', { name: '原片对白语言' }), { target: { value: 'zh-CN' } });
     expect(screen.getByRole('combobox', { name: '解说语言' })).toHaveValue('en-US');
+    fireEvent.click(screen.getByRole('button', { name: '关闭生成设置' }));
     fireEvent.click(screen.getByRole('tab', { name: /对白字幕/ }));
     mocks.calibrateTranscript.mockResolvedValue({ calibration_id: 'cal-1', status: 'RUNNING' });
     mocks.getTranscriptCalibration.mockResolvedValue({ calibration_id: 'cal-1', status: 'SUCCEEDED', result: { language: 'zh-CN', revision: 1, cues: [{ ...transcript.cues[0], text: '你好，大海。', start: 1.1, end: 2.9 }] } });
@@ -383,7 +484,7 @@ describe('local video workspace', () => {
   it('protects unsaved narration when changing versions and seeks the player to a cue', async () => {
     studio();
     const field = await screen.findByRole('textbox', { name: '口述稿 1' });
-    fireEvent.click(screen.getByRole('button', { name: '跳转到解说 1' }));
+    fireEvent.click(screen.getByRole('button', { name: '定位试听' }));
     expect((screen.getByLabelText('口述解说视频播放器') as HTMLVideoElement).currentTime).toBe(5);
     fireEvent.change(field, { target: { value: 'A small wave reaches the shore.' } });
     fireEvent.change(screen.getByRole('combobox', { name: '选择历史版本' }), { target: { value: 'job-1' } });
@@ -413,11 +514,12 @@ describe('local video workspace', () => {
     const field = await screen.findByRole('textbox', { name: '口述稿 1' });
     fireEvent.change(field, { target: { value: 'A blue wave rolls ashore.' } });
     mocks.renderNarration.mockResolvedValue({ execution_arn: 'job-new', start_date: '2026-09-16T00:00:00Z' });
-    fireEvent.click(screen.getByRole('button', { name: '重新配音并导出' }));
+    fireEvent.click(screen.getByRole('button', { name: '重新配音并保存新版本' }));
     fireEvent.click(screen.getByRole('button', { name: '确认并开始' }));
     await waitFor(() => expect(screen.getByText('Speech service unavailable')).toBeVisible(), { timeout: 3000 });
+    fireEvent.click(within(screen.getByRole('navigation', { name: '制作流程' })).getByRole('button', { name: '3校对' }));
     expect(field).toHaveValue('A blue wave rolls ashore.');
-    expect(screen.getByRole('button', { name: '重新配音并导出' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '重新配音并保存新版本' })).toBeEnabled();
     expect(screen.getByText('未保存')).toBeVisible();
   });
 });

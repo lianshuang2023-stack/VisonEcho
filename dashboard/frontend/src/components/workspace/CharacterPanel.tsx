@@ -12,17 +12,19 @@ import { proposeCharacterRenames } from './characterUtils';
 import type { NarrationReplacement } from './characterUtils';
 
 export interface CharacterPanelHandle { createFromFrame: (frame: CharacterFrameSelection) => void; discard: () => void }
-const emptyCharacter = (): VideoCharacter => ({ id: '', appearance: '', preferred_name: '', status: 'unconfirmed', aliases: [], thumbnail: null, occurrences: [] });
+const emptyCharacter = (): VideoCharacter => ({ id: '', appearance: '', preferred_name: '', before_name: '', name_available_from: 0, status: 'unconfirmed', aliases: [], thumbnail: null, occurrences: [] });
 const code = (character: VideoCharacter) => 'P-' + character.id.slice(0, 8).toUpperCase();
 interface Props {
   projectId: string; jobId: string; segments: NarrationSegment[]; disabled?: boolean; refreshKey?: number; automaticDetection?: NarrationEditor['character_detection'];
   ref?: Ref<CharacterPanelHandle>; onDirtyChange: (dirty: boolean) => void;
   onBusyChange: (busy: boolean) => void; onApply: (replacements: NarrationReplacement[]) => void;
+  onSaved?: () => void;
+  defaultOpen?: boolean;
 }
 
-export default function CharacterPanel({ projectId, jobId, segments, disabled = false, refreshKey, automaticDetection, ref, onDirtyChange, onBusyChange, onApply }: Props) {
+export default function CharacterPanel({ projectId, jobId, segments, disabled = false, refreshKey, automaticDetection, ref, onDirtyChange, onBusyChange, onApply, onSaved, defaultOpen = false }: Props) {
   const { t, language } = useUiPreferences();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [library, setLibrary] = useState<CharacterLibrary | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -45,6 +47,7 @@ export default function CharacterPanel({ projectId, jobId, segments, disabled = 
   const detectionStartedAt = useRef(0);
   const activeProject = useRef(projectId);
   const localError = useEffectEvent((reason: unknown) => errorMessage(reason, language));
+  const notifySaved = useEffectEvent(() => onSaved?.());
   const counts = (result: { added_count?: number; updated_count?: number; skipped_count?: number }) => t('新增 ', 'Added ') + (result.added_count ?? 0) + t('，更新 ', ', updated ') + (result.updated_count ?? 0) + t('，待整理 ', ', pending ') + (result.skipped_count ?? 0) + t(' 张人物卡。', ' character cards.');
   const detecting = detection?.status === 'RUNNING';
   const cardBusy = saving || submittingDetection || detecting;
@@ -83,6 +86,7 @@ export default function CharacterPanel({ projectId, jobId, segments, disabled = 
           const updated = await getCharacters(projectId);
           if (!active) return;
           setLibrary(updated);
+          notifySaved();
         }
         setDetection(next); setDetectionError('');
         if (next.status !== 'RUNNING') return;
@@ -151,6 +155,7 @@ export default function CharacterPanel({ projectId, jobId, segments, disabled = 
       setLibrary(result); setDraft(null); setBaseline(null); setFrame(null);
       setProposals(replacements); setSelected([]);
       setNotice(t('人物卡已保存。已识别或确认的称呼将用于后续生成。', 'Character saved. Recognized or confirmed names will be used in future generations.'));
+      onSaved?.();
     } catch (reason) { setError(errorMessage(reason, language)); }
     finally { setSaving(false); }
   }
@@ -187,6 +192,8 @@ export default function CharacterPanel({ projectId, jobId, segments, disabled = 
         {draft.thumbnail && <small>{t('原片时间 ', 'Source time ') + frameTime(draft.thumbnail.timestamp)}</small>}
         <label className="ws-field">{t('外观特征', 'Appearance')}<textarea aria-label={t('人物外观特征', 'Character appearance')} value={draft.appearance} required maxLength={600} disabled={saving} placeholder={t('例如：画面左侧穿红色外套的短发女性', 'For example: short-haired woman in a red coat on the left')} onChange={event => setDraft({ ...draft, appearance: event.target.value })} /></label>
         <label className="ws-field">{t('统一称呼', 'Preferred name')}<input aria-label={t('人物统一称呼', 'Character preferred name')} value={draft.preferred_name} maxLength={100} disabled={saving} onChange={event => setDraft({ ...draft, preferred_name: event.target.value })} /></label>
+        <label className="ws-field">{t('姓名揭晓前的称呼', 'Name before introduction')}<input aria-label={t('姓名揭晓前的称呼', 'Name before introduction')} value={draft.before_name ?? ''} maxLength={100} disabled={saving} placeholder={t('例如：蓝衣女人', 'For example: woman in blue')} onChange={event => setDraft({ ...draft, before_name: event.target.value })} /></label>
+        <label className="ws-field">{t('最早可使用姓名（原片秒数）', 'Name available from (source seconds)')}<input aria-label={t('姓名最早出现秒数', 'Earliest name time')} type="number" min={0} step={0.1} value={draft.name_available_from ?? 0} disabled={saving} onChange={event => setDraft({ ...draft, name_available_from: event.target.value === '' ? 0 : Number(event.target.value) })} /><small>{t('该时间之前仅使用外观称呼；生成和审校都会检查提前透露姓名。', 'Earlier scenes use the appearance label. Generation and review check for early name disclosure.')}</small></label>
         <label className="ws-field">{t('此前称呼 / 别名', 'Previous names / aliases')}<input aria-label={t('人物别名', 'Character aliases')} value={aliases} disabled={saving} placeholder={t('以逗号分隔', 'Separate with commas')} onChange={event => setAliases(event.target.value)} /></label>
         {draft.status === 'recognized' && <p className="ve-evidence-caption">{t('已识别角色，可直接用于解说；修改称呼会保存为人工确认。', 'Recognized character, ready for narration. Editing the name saves a manual confirmation.')}</p>}
         <label className="ve-confirm-character"><input type="checkbox" checked={draft.status === 'confirmed'} disabled={saving} onChange={event => setDraft({ ...draft, status: event.target.checked ? 'confirmed' : 'unconfirmed' })} />{t('已确认此人物及称呼', 'Confirm this character and name')}</label>

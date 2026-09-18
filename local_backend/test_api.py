@@ -47,7 +47,9 @@ def test_real_media_upload_range_and_pipeline_response_contract(tmp_path, monkey
         output_dir.mkdir(parents=True)
         output = output_dir / 'described.mp4'
         output.write_bytes(input_path.read_bytes())
-        return {'output_path': str(output), 'segments': [
+        transcript = output_dir / 'transcript.json'
+        transcript.write_text(json.dumps({'cues': []}))
+        return {'output_path': str(output), 'transcript_path': str(transcript), 'segments': [
             {'segment_index': 0, 'start_time': 0, 'end_time': 1, 'silence_duration': 1,
              'dvi_text': 'A blue background.', 'audio_duration': 0.8, 'pass': True}], 'usage': {}}
     monkeypatch.setattr(main, 'process_video', fake_pipeline)
@@ -63,6 +65,11 @@ def test_real_media_upload_range_and_pipeline_response_contract(tmp_path, monkey
         assert client.get(f'/api/trigger/executions/{job}/status').json()['status'] == 'SUCCEEDED'
         assert client.get(f'/api/videos/{job}/segments').json()['segments'][0]['start'] == 0
         assert client.get(f'/api/videos/{job}/summary').json()['summary']['segments_passed'] == 1
+        review = client.get(f'/api/videos/{job}/review-state').json()
+        assert client.get(f'/api/media/output/{job}?download=true').status_code == 200
+        assert client.put(f'/api/videos/{job}/review-state', json={
+            'revision': review['revision'], 'transcript_revision': review['transcript_revision'],
+            'changes': [{'segment_index': 0, 'state': 'approved'}]}).status_code == 200
         assert client.get(f'/api/media/output/{job}?download=true').headers['content-disposition'].startswith('attachment')
         assert len(client.get('/api/videos').json()['videos']) == 1
 

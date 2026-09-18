@@ -33,7 +33,9 @@ def workspace(tmp_path):
         'execution_arn': 'result', 'video_id': 'video', 'status': 'SUCCEEDED',
         'start_date': '2026-09-02', 'stop_date': '2026-09-03', 'steps': [],
         'result': {'transcript_path': str(run / 'transcript.json'),
-                   'output_path': str(run / 'output.mp4'), 'segments': []},
+                   'output_path': str(run / 'output.mp4'), 'segments': [
+                       {'segment_index': 0, 'start_time': 4, 'end_time': 7, 'silence_duration': 3,
+                        'dvi_text': 'A mountain lake.', 'audio_duration': 2, 'pass': True}]},
     }
     store.data['outputs']['result'] = {'filename': 'original-described.mp4'}
     store.save()
@@ -118,6 +120,7 @@ def test_review_toggle_tracks_revision_and_persists_to_latest_project(workspace)
     client, store, _ = workspace
     initial = client.get('/api/projects/video').json()['project']
     assert initial['workflow_status'] == 'review' and initial['reviewed'] is False
+    approve_segments(client)
     response = client.post('/api/videos/result/review', json={'reviewed': True, 'transcript_revision': 0})
     assert response.status_code == 200
     assert response.json()['reviewed'] is True and response.json()['reviewed_at']
@@ -129,6 +132,14 @@ def test_review_toggle_tracks_revision_and_persists_to_latest_project(workspace)
     response = client.post('/api/videos/result/review', json={'reviewed': False})
     assert response.json() == {'reviewed': False, 'reviewed_at': None, 'transcript_revision': 0}
     assert client.get('/api/projects/video').json()['project']['workflow_status'] == 'review'
+
+
+def approve_segments(client):
+    document = client.get('/api/videos/result/review-state').json()
+    response = client.put('/api/videos/result/review-state', json={
+        'revision': document['revision'], 'transcript_revision': document['transcript_revision'],
+        'changes': [{'segment_index': 0, 'state': 'approved'}]})
+    assert response.status_code == 200 and response.json()['review_complete']
 
 
 def test_review_rejects_missing_or_stale_subtitle_revision(workspace):
@@ -165,6 +176,7 @@ def test_review_requires_completed_visible_idle_result(workspace, case, status):
 
 def test_subtitle_save_invalidates_review_and_old_confirmation(workspace):
     client, store, _ = workspace
+    approve_segments(client)
     assert client.post('/api/videos/result/review', json={'reviewed': True, 'transcript_revision': 0}).status_code == 200
     transcript = client.get('/api/videos/result/transcript').json()
     transcript['cues'][0]['text'] = 'Corrected dialogue.'
@@ -175,12 +187,14 @@ def test_subtitle_save_invalidates_review_and_old_confirmation(workspace):
     assert job['reviewed'] is False and job['transcript_revision'] == 1
     assert 'reviewed_at' not in job and 'reviewed_transcript_revision' not in job
     assert client.post('/api/videos/result/review', json={'reviewed': True, 'transcript_revision': 0}).status_code == 409
+    approve_segments(client)
     assert client.post('/api/videos/result/review', json={'reviewed': True, 'transcript_revision': 1}).status_code == 200
     assert client.get('/api/projects/video').json()['project']['workflow_status'] == 'exportable'
 
 
 def test_review_and_subtitle_save_failures_preserve_saved_state(workspace, monkeypatch):
     client, store, _ = workspace
+    approve_segments(client)
     transcript = client.get('/api/videos/result/transcript').json()
     before = copy.deepcopy(store.data)
     def fail():
@@ -192,11 +206,12 @@ def test_review_and_subtitle_save_failures_preserve_saved_state(workspace, monke
     assert client.put('/api/videos/result/transcript', json=transcript).status_code == 500
     assert store.data == before
     assert not (store.root / 'runs/result/transcript-edits.json').exists()
-    assert client.get('/api/videos/result/transcript').json()['cues'][0]['text'] == 'Original dialogue.'
+    assert client.get('/api/videos/result/transcript').json()['cues'][0]['text'] == 'Original dialogue'
 
 
 def test_review_state_checks_actual_saved_revision_and_supports_legacy_missing_transcript(workspace):
     client, store, _ = workspace
+    approve_segments(client)
     assert client.post('/api/videos/result/review', json={'reviewed': True, 'transcript_revision': 0}).status_code == 200
     draft = store.root / 'runs/result/transcript-edits.json'
     draft.write_text(json.dumps({'revision': 8, 'cues': []}))
@@ -208,7 +223,7 @@ def test_review_state_checks_actual_saved_revision_and_supports_legacy_missing_t
     draft.unlink()
     store.data['executions']['result']['result'].pop('transcript_path')
     response = client.post('/api/videos/result/review', json={'reviewed': True, 'transcript_revision': 0})
-    assert response.status_code == 200 and response.json()['transcript_revision'] == 0
+    assert response.status_code == 409
 
 
 @pytest.mark.parametrize(('latest_status', 'workflow'), [
@@ -216,6 +231,7 @@ def test_review_state_checks_actual_saved_revision_and_supports_legacy_missing_t
 ])
 def test_new_version_never_inherits_old_review_or_hides_latest_failure(workspace, latest_status, workflow):
     client, store, settings = workspace
+    approve_segments(client)
     assert client.post('/api/videos/result/review', json={'reviewed': True, 'transcript_revision': 0}).status_code == 200
     newer = {
         'execution_arn': 'newer', 'video_id': 'video', 'status': latest_status,

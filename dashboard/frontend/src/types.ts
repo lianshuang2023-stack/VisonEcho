@@ -1,5 +1,5 @@
 export type VideoLanguage = 'en-US' | 'zh-CN';
-export type DialogueLanguage = VideoLanguage | 'auto';
+export type DialogueLanguage = VideoLanguage | 'auto' | 'none';
 export type NarrationMode = 'auto' | 'standard' | 'extended';
 
 export interface SpeechVoice {
@@ -28,6 +28,7 @@ export interface BackendHealth {
 }
 
 export interface ExecutionStep {
+  detail?: { completed_segments?: number; num_segments?: number; frame_count?: number };
   name: string;
   status: 'pending' | 'running' | 'succeeded' | 'failed';
   entered_at: string | null;
@@ -110,6 +111,8 @@ export interface ProjectTrash {
 }
 
 export interface TranscriptCue {
+  speaker?: string | null;
+  low_confidence?: boolean;
   id: string;
   start: number;
   end: number;
@@ -122,6 +125,9 @@ export interface Transcript {
   language?: DialogueLanguage;
   dialogue_language?: DialogueLanguage;
   quality?: {
+    speaker_count?: number;
+    diarization_available?: boolean;
+    overlapping_utterance_count?: number;
     review_required?: boolean;
     low_confidence_phrase_count?: number;
     low_confidence_word_count?: number;
@@ -136,6 +142,9 @@ export interface TranscriptCalibration {
 }
 
 export interface NarrationSegment {
+  source_start?: number;
+  source_end?: number;
+  insertion_time?: number;
   character_ids?: string[];
   segment_index: number;
   start_time: number;
@@ -155,6 +164,9 @@ export interface TimelineInsertion {
 }
 
 export interface NarrationEditor {
+  dialogue_status?: 'recognized' | 'no_speech' | 'unrecognized';
+  dialogue_reason?: 'recognized' | 'no_audio_track' | 'silent_audio' | 'initial_silence_timeout' | 'no_recognized_dialogue' | 'speech_not_recognized' | 'user_declared_no_dialogue';
+  narration_style?: 'concise' | 'cinematic';
   character_detection?: { status: 'DISABLED' | 'SUCCEEDED' | 'FAILED'; added_count?: number; updated_count?: number; skipped_count?: number; candidate_count?: number; error?: string | null; coverage?: { frame_count: number; segment_count: number } };
   segments: NarrationSegment[];
   language: VideoLanguage;
@@ -178,6 +190,9 @@ export type EvidenceIssue = 'wrong_person' | 'wrong_action' | 'missing_content';
 export interface EvidenceFrame { id: string; timestamp: number; url: string }
 export interface EvidenceFeedback { revision: number; issues: EvidenceIssue[]; note: string }
 export interface SegmentEvidence {
+  generation_reason?: string;
+  window_reason?: 'dialogue_gap' | 'extended_pause';
+  nearby_dialogue?: { text: string; start?: number; end?: number }[];
   segment_index: number;
   source_start: number;
   source_end: number;
@@ -189,6 +204,8 @@ export interface SegmentEvidence {
 export interface CharacterOccurrence { job_id: string; segment_index: number }
 export interface CharacterThumbnail extends CharacterOccurrence { frame_id: string; timestamp: number; url: string }
 export interface VideoCharacter {
+  before_name?: string;
+  name_available_from?: number;
   id: string;
   appearance: string;
   preferred_name: string;
@@ -199,6 +216,27 @@ export interface VideoCharacter {
   occurrences: CharacterOccurrence[];
 }
 export interface CharacterLibrary { revision: number; characters: VideoCharacter[] }
+export type SegmentReviewState = 'draft' | 'modified' | 'approved' | 'needs_rewrite';
+export interface SegmentReview {
+  segment_index: number;
+  state: SegmentReviewState;
+  text: string;
+  available_seconds: number;
+  speech_seconds: number;
+  timing_source: 'measured' | 'estimated';
+  margin_seconds: number;
+  risks: string[];
+  high_risk: boolean;
+}
+export interface StudioReviewDocument {
+  revision: number;
+  transcript_revision: number;
+  segments: SegmentReview[];
+  counts: { total: number; pending: number; approved: number; conflicts: number; uncertain: number };
+  can_export: boolean;
+  review_complete?: boolean;
+  blockers: string[];
+}
 export type CharacterFrameSelection = CharacterThumbnail;
 export interface CharacterDetection {
   detection_id: string;

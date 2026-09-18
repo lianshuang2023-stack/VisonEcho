@@ -8,6 +8,7 @@ import type { NarrationSegment, TimelineInsertion, TranscriptCue, VideoProject }
 import { toSourceTime, toOutputTime } from './timeline';
 import { Alert, Loading, Modal } from './WorkspaceShared';
 import { duration } from './workspaceUtils';
+import { activeSubtitleCues, hasSpeakerMetadata, speakerLabel } from './subtitleDisplay';
 
 type Source = 'original' | 'described';
 interface PreviewData {
@@ -109,7 +110,8 @@ export default function ComparisonPreview({ video, onClose, onEdit }: { video: V
   const narration = useMemo(() => data.segments.filter(segment => segment.pass && segment.dvi_text.trim() && segment.audio_duration !== null && Number.isFinite(segment.audio_duration) && segment.audio_duration > 0)
     .map(segment => ({ id: String(segment.segment_index), start: segment.start_time, end: Math.min(total, segment.start_time + (segment.audio_duration ?? 0)), text: segment.dvi_text }))
     .filter(segment => validRange(segment.start, segment.end) && segment.start < total), [data.segments, total]);
-  const activeCue = dialogue.find(cue => timelineTime >= cue.start && timelineTime < cue.end);
+  const activeCues = activeSubtitleCues(dialogue, timelineTime);
+  const speakerMetadata = hasSpeakerMetadata(dialogue);
   const activeNarration = selectedSource === 'described' ? narration.find(segment => timelineTime >= segment.start && timelineTime < segment.end) : undefined;
 
   function rememberPosition(keepPlaying = true): PlaybackPosition {
@@ -183,7 +185,7 @@ export default function ComparisonPreview({ video, onClose, onEdit }: { video: V
         <div className="ve-comparison-timeline-scale" aria-hidden="true"><span>{duration(0)}</span><span>{duration(total / 2)}</span><span>{duration(total)}</span></div>
       </section>}
       {data.resultId && <div className="ve-comparison-text">
-        <div className={'ve-comparison-text-cue original ' + (activeCue ? 'active' : '')}><span>{t("原对白", "Dialogue")}</span><p>{activeCue?.text || (data.dialogueLoaded ? t("当前无对白", "No dialogue at this point") : t("对白文本暂不可用", "Dialogue text unavailable"))}</p></div>
+        <div className={'ve-comparison-text-cue original ' + (activeCues.length ? 'active' : '')}><span>{t("原对白", "Dialogue")}</span>{activeCues.length ? activeCues.map(cue => <p key={cue.id}>{speakerMetadata && <strong>{speakerLabel(cue.speaker, t)}: </strong>}{cue.text}</p>) : <p>{data.dialogueLoaded ? t("当前无对白", "No dialogue at this point") : t("对白文本暂不可用", "Dialogue text unavailable")}</p>}</div>
         <div className={'ve-comparison-text-cue described ' + (activeNarration ? 'active' : '')}><span>{t("口述解说", "Audio description")}</span><p>{activeNarration?.text || (data.narrationLoaded ? t("当前无口述解说", "No narration at this point") : t("口述文本暂不可用", "Narration text unavailable"))}</p></div>
       </div>}
     </>}

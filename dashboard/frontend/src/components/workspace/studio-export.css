@@ -1,0 +1,17 @@
+.ve-export-menu { color:var(--ws-text,#233127); min-width:0; }
+.ve-export-controls { display:flex; align-items:stretch; flex-wrap:wrap; gap:10px; }
+.ve-export-controls>.fui-Dropdown { min-width:210px; flex:1; }
+.ve-export-controls>.fui-Button { min-height:36px; white-space:nowrap; }
+.ws-app .ve-export-controls>a.fui-Button { color:#fff; text-decoration:none; }
+:root[data-ui-theme=dark] .ws-app .ve-export-controls>a.fui-Button { color:#11271b; }
+.ve-export-option { display:grid; gap:4px; padding-block:3px; max-width:360px; }
+.ve-export-option>strong { font-size:13px; font-weight:550; }
+.ve-export-option>small { font-size:11px; line-height:1.6; font-weight:400; }
+.ve-export-description,.ve-export-saved-note { margin:9px 0 0!important; color:var(--ws-muted,#637164); font-size:12px; line-height:1.65; }
+.ve-export-saved-note { font-size:11px; }
+.ve-export-trigger { min-height:36px; gap:8px; }
+.ve-export-popover { width:min(360px,calc(100vw - 32px)); max-width:calc(100vw - 32px); box-sizing:border-box; }
+.ve-export-popover .ve-export-option { max-width:100%; padding-block:5px; white-space:normal; }
+.ve-export-popover .ve-export-saved-note { padding:10px 9px 6px; border-top:1px solid var(--colorNeutralStroke2,#dce3d8); color:var(--colorNeutralForeground2,#637164); }
+.ve-export-popover a { text-decoration:none; }
+@media(max-width:480px) { .ve-export-controls>.fui-Dropdown { min-width:160px; } }
