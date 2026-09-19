@@ -21,15 +21,18 @@ photographer attribution could not be verified and is not asserted here. The
 source is used under the standard Unsplash license, not public domain or CC0.
 
 All motion is an illustrative slow zoom of this still photograph. The original
-sample has no audio; narrated versions use installed macOS voices locally
-(Samantha for English and Tingting for Chinese), not paid cloud speech services.
+sample has no audio. Narration was refreshed on 2026-09-19 using Azure Speech
+stock neural voices: Ava Multilingual (`en-US-AvaMultilingualNeural`) for English
+and Xiaoxiao (`zh-CN-XiaoxiaoNeural`, gentle style) for Chinese. These are synthetic
+voices, not human recordings or clones of a real person. Sentence pauses and
+playback loudness were adjusted; speech is neither sped up nor time-stretched.
 The spoken words are original scene descriptions written for this demonstration.
 
-English narration, 0.700–6.918 seconds:
+English narration, approximately 0.700–7.210 seconds, with sentence-level captions:
 
 > A wooden boat points across a green lake. Dense forest lines the shore beneath steep, pale mountains.
 
-Chinese narration, 0.700–8.469 seconds:
+Chinese narration, approximately 0.700–7.560 seconds, with sentence-level captions:
 
 > 木船的船头朝向碧绿色的湖面。两岸林木茂密，后方耸立着灰白色的山峰。
 

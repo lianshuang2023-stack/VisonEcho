@@ -16,6 +16,7 @@ interface Props {
 }
 
 const mediaRoot = '/assets/landing';
+const narrationRevision = 'neural-20260919';
 
 export default function LandingPage({ onStart, onLogin, busy, error, onRetry, hasWorkspace = false }: Props) {
   const { t, language, theme, setLanguage, setTheme } = useUiPreferences();
@@ -29,7 +30,7 @@ export default function LandingPage({ onStart, onLogin, busy, error, onRetry, ha
   const title = useRef<HTMLHeadingElement>(null);
   const pendingSeek = useRef<number | null>(null);
   const sampleLanguage = language === 'en' ? 'en' : 'zh';
-  const source = `${mediaRoot}/sample-${described ? sampleLanguage : 'original'}.mp4`;
+  const source = `${mediaRoot}/sample-${described ? sampleLanguage : 'original'}.mp4${described ? `?rev=${narrationRevision}` : ''}`;
   useEffect(() => {
     // The overview mounts after the hash changes. Restore its intended position
     // once the content exists instead of keeping the studio's scroll offset.
@@ -105,7 +106,7 @@ export default function LandingPage({ onStart, onLogin, busy, error, onRetry, ha
           <div className="lp-sample-toolbar"><span><AudioLines size={17} aria-hidden="true" />{t('听听有什么不同', 'Hear the difference')}</span><div className="lp-track-toggle" role="group" aria-label={t('演示音轨', 'Sample audio track')}><button type="button" aria-pressed={!described} onClick={() => selectTrack(false)}>{t('原画面', 'Original')}</button><button type="button" aria-pressed={described} onClick={() => selectTrack(true)}>{t('加入解说', 'Described')}</button></div></div>
           <div className="lp-video-wrap">
             <video key={source} ref={video} src={source} poster={`${mediaRoot}/lake.webp`} controls={!audioFocus} playsInline preload="metadata" aria-label={t('湖景口述演示视频', 'Lake scene audio description sample')} onLoadedMetadata={() => { if (pendingSeek.current !== null && video.current) { video.current.currentTime = pendingSeek.current; pendingSeek.current = null; } }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} onError={() => setMediaError(true)}>
-              {described && <track key={sampleLanguage} kind="captions" src={`${mediaRoot}/sample-${sampleLanguage}.vtt`} srcLang={language === 'en' ? 'en' : 'zh-CN'} label={t('中文口述稿', 'English description')} default />}
+              {described && <track key={sampleLanguage} kind="captions" src={`${mediaRoot}/sample-${sampleLanguage}.vtt?rev=${narrationRevision}`} srcLang={language === 'en' ? 'en' : 'zh-CN'} label={t('中文口述稿', 'English description')} default />}
             </video>
             {audioFocus && <div className="lp-audio-focus"><Headphones size={30} strokeWidth={1.3} aria-hidden="true" /><strong>{t('专注听见画面', 'Let the words set the scene.')}</strong><span>{described ? t('听听解说补充了哪些画面信息。', 'Listen for the details the narration adds.') : t('原演示片段没有音轨，可切换至「加入解说」。', 'This original sample is silent. Switch to Described.')}</span><button type="button" className="lp-focus-play" onClick={() => void playSample()}>{playing ? <Pause size={14} aria-hidden="true" /> : <Play size={14} aria-hidden="true" />}{playing ? t('暂停', 'Pause') : t('播放', 'Play')}</button></div>}
             {!audioFocus && !playing && !mediaError && <button type="button" className="lp-play" onClick={() => void playSample()} aria-label={t('播放演示片段', 'Play sample')}><Play size={25} fill="currentColor" aria-hidden="true" /></button>}

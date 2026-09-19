@@ -18,13 +18,13 @@
 
 ## 演示制作方式
 
-所有动态效果都来自对这张静态照片的缓慢缩放，仅用于演示。原始样片没有音频；口述版使用本机安装的 macOS 声音合成，英文使用 Samantha，中文使用 Tingting，未调用付费云端语音服务。口述稿是为本演示原创撰写的场景描述。
+所有动态效果都来自对这张静态照片的缓慢缩放，仅用于演示。原始样片没有音频。2026 年 9 月 19 日更新配音：英文使用 Azure Speech 的 Ava Multilingual（`en-US-AvaMultilingualNeural`），中文使用晓晓（`zh-CN-XiaoxiaoNeural`，gentle 风格）。它们是预置合成音色，并非真人录音或声音克隆。配音调整了句间停顿和播放响度，没有加速或拉伸语音。口述稿是为本演示原创撰写的场景描述。
 
-英文配音，0.700–6.918 秒：
+英文配音约为 0.700–7.210 秒，字幕按句显示：
 
 > A wooden boat points across a green lake. Dense forest lines the shore beneath steep, pale mountains.
 
-中文配音，0.700–8.469 秒：
+中文配音约为 0.700–7.560 秒，字幕按句显示：
 
 > 木船的船头朝向碧绿色的湖面。两岸林木茂密，后方耸立着灰白色的山峰。
 
