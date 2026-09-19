@@ -1,0 +1,113 @@
+name: Public frontend bundle
+
+# Build public browser assets only; no credentials, backend data or deployment.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Export the selected frontend source without local configuration
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          source_dir="$RUNNER_TEMP/visionecho-frontend-source"
+          mkdir -p "$source_dir"
+          git archive "$GITHUB_SHA" dashboard/frontend | tar -x -C "$source_dir"
+          python - "$source_dir/dashboard/frontend" <<'PY'
+          from pathlib import Path
+          import sys
+          root = Path(sys.argv[1])
+          for path in root.rglob("*"):
+              if path.is_symlink() or path.name.startswith(".env") or path.name in {"node_modules", ".local-data", ".hosted-data"}:
+                  raise SystemExit("Unexpected configuration or runtime file in frontend source")
+          PY
+          printf 'FRONTEND_SOURCE=%s\n' "$source_dir/dashboard/frontend" >> "$GITHUB_ENV"
+      - name: Build the public frontend
+        run: |
+          set -euo pipefail
+          cd "$FRONTEND_SOURCE"
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Package dist and verification metadata
+        run: |
+          set -euo pipefail
+          package_dir="$RUNNER_TEMP/visionecho-frontend-package"
+          bundle_dir="$RUNNER_TEMP/visionecho-frontend-artifact"
+          mkdir -p "$package_dir" "$bundle_dir"
+          cp -R "$FRONTEND_SOURCE/dist" "$package_dir/dist"
+          python - "$package_dir" <<'PY'
+          from pathlib import Path
+          import hashlib
+          import json
+          import os
+          import sys
+          root = Path(sys.argv[1])
+          dist = root / "dist"
+          revision = os.environ["GITHUB_SHA"]
+          allowed_public = {"favicon.svg"}
+          allowed_demo = {"lake.webp", "frame-0.webp", "frame-4.webp", "frame-8.webp",
+                          "sample-original.mp4", "sample-en.mp4", "sample-zh.mp4",
+                          "sample-en.vtt", "sample-zh.vtt", "SOURCE.md", "SOURCE.zh-CN.md"}
+          files = []
+          for path in dist.rglob("*"):
+              if path.is_symlink():
+                  raise SystemExit("Symlink in frontend output")
+              if not path.is_file():
+                  continue
+              rel = path.relative_to(dist)
+              allowed = (rel.as_posix() in allowed_public or rel.as_posix() == "index.html"
+                         or rel.parent.as_posix() == "assets" and path.suffix in {".js", ".css"}
+                         or rel.parent.as_posix() == "assets/landing" and path.name in allowed_demo)
+              if not allowed:
+                  raise SystemExit("Unexpected file in public frontend output: " + rel.as_posix())
+              files.append(path)
+          required = ["index.html", "assets/landing/sample-en.mp4", "assets/landing/sample-zh.mp4",
+                      "assets/landing/sample-en.vtt", "assets/landing/sample-zh.vtt"]
+          if not all((dist / name).is_file() for name in required):
+              raise SystemExit("Required frontend assets missing")
+          (root / "frontend-revision.txt").write_text(revision + "\n")
+          (dist / "assets" / "frontend-revision.txt").write_text(revision + "\n")
+          info = {"source_commit": revision, "repository": os.environ["GITHUB_REPOSITORY"],
+                  "run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+                  "contents": "Public frontend build only; no server configuration or user workspaces"}
+          (root / "build-info.json").write_text(json.dumps(info, indent=2) + "\n")
+          files += [root / "frontend-revision.txt", dist / "assets" / "frontend-revision.txt", root / "build-info.json"]
+          lines = []
+          for path in sorted(files):
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              lines.append(digest + "  " + path.relative_to(root).as_posix())
+          (root / "SHA256SUMS").write_text("\n".join(lines) + "\n")
+          PY
+          (cd "$package_dir" && sha256sum --check SHA256SUMS)
+          tar -czf "$bundle_dir/frontend.tar.gz" -C "$package_dir" dist frontend-revision.txt build-info.json SHA256SUMS
+          cp "$package_dir/frontend-revision.txt" "$package_dir/build-info.json" "$bundle_dir/"
+          (cd "$bundle_dir" && sha256sum frontend.tar.gz frontend-revision.txt build-info.json > SHA256SUMS)
+          printf 'FRONTEND_BUNDLE=%s\n' "$bundle_dir" >> "$GITHUB_ENV"
+      - name: Retain the public frontend artifact for one day
+        uses: actions/upload-artifact@v4
+        with:
+          name: visionecho-frontend-${{ github.sha }}
+          path: ${{ env.FRONTEND_BUNDLE }}/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
