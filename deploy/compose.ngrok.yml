@@ -34,7 +34,8 @@ services:
     volumes:
       - app-data:/data
     networks:
-      - web
+      web:
+        ipv4_address: ${APP_PRIVATE_IP:-172.30.89.3}
     security_opt:
       - no-new-privileges:true
     cap_drop:

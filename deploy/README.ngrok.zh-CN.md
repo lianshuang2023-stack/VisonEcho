@@ -32,11 +32,14 @@ NGROK_AUTHTOKEN=REPLACE_WITH_YOUR_AGENT_AUTHTOKEN
 NGROK_IMAGE=ngrok/ngrok:latest
 NGROK_SUBNET=172.30.89.0/24
 NGROK_PRIVATE_IP=172.30.89.2
+APP_PRIVATE_IP=172.30.89.3
 ```
 
 `NGROK_DOMAIN` 只填账号中已分配的主机名，不含 `https://`、路径或端口。原 `DOMAIN` 字段仅供 Caddy 配置使用，此方案忽略它。Compose 自动生成精确的 `PUBLIC_ORIGIN=https://…`，不要改写请求 Host 为 `localhost`。
 
-ngrok 使用官方 `ngrok/ngrok` 镜像。默认标签为 `latest`，部署验证后可将 `NGROK_IMAGE` 固定到当次下载镜像的 digest，避免以后更新时意外更换版本。应用仅信任 ngrok 容器的固定私网 IP 提供转发头；网段冲突时同时修改 `NGROK_SUBNET` 和 `NGROK_PRIVATE_IP`，不要使用 `FORWARDED_ALLOW_IPS=*`。
+ngrok 使用官方 `ngrok/ngrok` 镜像。默认标签为 `latest`，部署验证后可将 `NGROK_IMAGE` 固定到当次下载镜像的 digest，避免以后更新时意外更换版本。两个容器使用不同的固定地址：ngrok 为 `172.30.89.2`，应用为 `172.30.89.3`。固定应用地址可防止应用先启动时，被 Docker 动态分配到 ngrok 预留的地址。
+
+应用仅信任 `NGROK_PRIVATE_IP` 提供的转发头。网段冲突时同时修改 `NGROK_SUBNET`、`NGROK_PRIVATE_IP` 和 `APP_PRIVATE_IP`。两个 IP 必须是该子网内不同且未占用的主机地址，均不能使用网关地址。不要使用 `FORWARDED_ALLOW_IPS=*`。
 
 [ngrok.yml.example](ngrok.yml.example) 是无凭据 v3 配置，由 Compose 只读挂载。`agent.web_addr: false` 关闭本地 Web / API，`--inspect=false` 关闭代理端 HTTP 流量检查。ngrok 云端处理及其保留规则仍由账号和平台决定，不能将本地检查关闭理解为流量从不经过 ngrok。
 

@@ -32,11 +32,14 @@ NGROK_AUTHTOKEN=REPLACE_WITH_YOUR_AGENT_AUTHTOKEN
 NGROK_IMAGE=ngrok/ngrok:latest
 NGROK_SUBNET=172.30.89.0/24
 NGROK_PRIVATE_IP=172.30.89.2
+APP_PRIVATE_IP=172.30.89.3
 ```
 
 `NGROK_DOMAIN` must be an assigned hostname without `https://`, a path, or a port. The original `DOMAIN` variable is for Caddy and is ignored here. Compose sets the exact `PUBLIC_ORIGIN=https://…`; do not rewrite the forwarded Host to `localhost`.
 
-The agent uses the official `ngrok/ngrok` image. The default tag is `latest`; after validating a deployment, pin `NGROK_IMAGE` to the downloaded image’s digest to avoid unexpected version changes. The app trusts forwarded headers only from the agent’s fixed private IP. If the subnet conflicts, change `NGROK_SUBNET` and `NGROK_PRIVATE_IP` together. Do not set `FORWARDED_ALLOW_IPS=*`.
+The agent uses the official `ngrok/ngrok` image. The default tag is `latest`; after validating a deployment, pin `NGROK_IMAGE` to the downloaded image’s digest to avoid unexpected version changes. Both containers have fixed, distinct addresses: ngrok uses `172.30.89.2`, and the app uses `172.30.89.3`. Fixing the app address prevents Docker from assigning it the agent’s reserved address when the app starts first.
+
+The app trusts forwarded headers only from `NGROK_PRIVATE_IP`. If the subnet conflicts, change `NGROK_SUBNET`, `NGROK_PRIVATE_IP` and `APP_PRIVATE_IP` together. Both addresses must be different, unused host addresses inside that subnet, and neither may be the network gateway. Do not set `FORWARDED_ALLOW_IPS=*`.
 
 [ngrok.yml.example](ngrok.yml.example) is a credential-free v3 configuration mounted read-only. `agent.web_addr: false` disables the local web UI / API, and `--inspect=false` disables agent-side HTTP inspection. ngrok cloud processing and retention remain subject to account and platform settings; disabling local inspection does not mean traffic bypasses ngrok.
 
